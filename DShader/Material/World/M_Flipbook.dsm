@@ -1,0 +1,50 @@
+Shader(Name="_Game/Material/M_Flipbook")
+{
+    Properties = {
+        TextureSampleParameter2D Texture = Path(Engine, "/EngineResources/DefaultTexture") [
+            Group="Flipbook|运行时";
+            SortPriority=0;
+            Description="翻页图集纹理；由运行时 MID 写入实际图集。";
+            SamplerType="Color";
+            SamplerSource="FromTextureAsset";
+        ];
+
+        VectorParameter UVOffset = float4(0.0, 0.0, 0.0, 0.0) [
+            Group="Flipbook|运行时";
+            SortPriority=1;
+            Description="当前帧在图集中的 UV 偏移（R/G 为 XY），由 SpriteFlipbook 写入。";
+        ];
+
+        VectorParameter UVScale = float4(1.0, 1.0, 0.0, 0.0) [
+            Group="Flipbook|运行时";
+            SortPriority=2;
+            Description="单帧 UV 缩放（R/G 为 XY）；默认整张纹理，由 SpriteFlipbook 写入。";
+        ];
+
+        ScalarParameter OpacityMultiplier = 1.0 [
+            Group="Flipbook|材质实例";
+            SortPriority=3;
+            Description="整体不透明度倍率；材质实例层调参。";
+        ];
+    }
+
+    Settings = {
+        Domain = "Surface";
+        ShadingModel = "Unlit";
+        BlendMode = "Translucent";
+        TwoSided = true;
+    }
+
+    Outputs = { float3 Color; float Alpha; Base.EmissiveColor = Color; Base.Opacity = Alpha; }
+
+    Graph = {
+        float2 uv = UE.TexCoord(Index=0);
+        float2 uvOffset = UE.Expression(Class="ComponentMask", OutputType="float2", Input=UVOffset, R=true, G=true, B=false, A=false);
+        float2 uvScale = UE.Expression(Class="ComponentMask", OutputType="float2", Input=UVScale, R=true, G=true, B=false, A=false);
+        float2 sampledUV = uv * uvScale + uvOffset;
+        float4 texColor = Texture(Coordinates=sampledUV);
+
+        Color = texColor.rgb;
+        Alpha = texColor.a * OpacityMultiplier;
+    }
+}
