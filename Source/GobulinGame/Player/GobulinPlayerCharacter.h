@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Core/Damageable.h"
+#include "Combat/GobulinSwordCombatComponent.h"
 #include "GameFramework/Character.h"
 #include "GameplayTagContainer.h"
 #include "GobulinPlayerCharacter.generated.h"
@@ -9,13 +10,16 @@
 class UBattleAttributeComponent;
 class UCameraComponent;
 class UInputAction;
-class UPlayerCombatComponent;
-class UFPSWeaponOverlayComponent;
+class UArrowComponent;
+class UStaticMeshComponent;
+class UGobulinCameraFeedbackComponent;
+class UGobulinSwordFeedbackComponent;
+class UGobulinWeaponViewComponent;
 struct FInputActionValue;
 
 /**
- * 正式玩家角色：只负责角色本体、移动、相机、属性和输入路由。
- * 武器与弹药由 UPlayerCombatComponent 管理。
+ * 正式玩家角色：负责角色本体、移动、相机、属性和输入路由。
+ * 第一把剑的攻击逻辑由 UGobulinSwordCombatComponent 管理。
  */
 UCLASS()
 class GOBULINGAME_API AGobulinPlayerCharacter : public ACharacter, public IDamageable
@@ -26,10 +30,11 @@ public:
 	AGobulinPlayerCharacter();
 
 	virtual void BeginPlay() override;
+	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
 	//~Begin IDamageable interface
-	virtual void TakeDamage_Implementation(const FDamageInfo& DamageInfo) override;
+	virtual FDamageResult TakeDamage_Implementation(const FDamageInfo& DamageInfo) override;
 	//~End IDamageable interface
 
 	/** 兼容 UGameplayStatics::ApplyDamage 等经典伤害入口。 */
@@ -40,13 +45,19 @@ public:
 	UCameraComponent* GetFirstPersonCameraComponent() const { return FirstPersonCameraComponent; }
 
 	UFUNCTION(BlueprintPure, Category = "Player")
-	UFPSWeaponOverlayComponent* GetFirstPersonWeaponOverlay() const { return FirstPersonWeaponOverlay; }
+	UGobulinWeaponViewComponent* GetFirstPersonWeaponView() const { return FirstPersonWeaponView; }
 
 	UFUNCTION(BlueprintPure, Category = "Player")
 	UBattleAttributeComponent* GetBattleAttributeComponent() const { return Attributes; }
 
 	UFUNCTION(BlueprintPure, Category = "Player")
-	UPlayerCombatComponent* GetPlayerCombatComponent() const { return Combat; }
+	UGobulinSwordCombatComponent* GetSwordCombatComponent() const { return SwordCombat; }
+
+	UFUNCTION(BlueprintPure, Category = "Player")
+	UGobulinSwordFeedbackComponent* GetSwordFeedbackComponent() const { return SwordFeedback; }
+
+	UFUNCTION(BlueprintPure, Category = "Player")
+	UGobulinCameraFeedbackComponent* GetCameraFeedbackComponent() const { return CameraFeedback; }
 
 	UFUNCTION(BlueprintPure, Category = "Player")
 	bool IsDead() const { return bDead; }
@@ -61,13 +72,27 @@ protected:
 
 	/** 仅本地玩家可见的 2D 武器层。 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	TObjectPtr<UFPSWeaponOverlayComponent> FirstPersonWeaponOverlay;
+	TObjectPtr<UGobulinWeaponViewComponent> FirstPersonWeaponView;
+
+	/** 实际显示剑贴图的 Plane 网格；相对偏移用于将剑柄对齐到视图支点。 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UStaticMeshComponent> FirstPersonWeaponVisual;
+
+	/** 可编辑的剑尖标记，用作剑尖轨迹检测的世界空间起点。 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UArrowComponent> FirstPersonSwordTip;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UBattleAttributeComponent> Attributes;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	TObjectPtr<UPlayerCombatComponent> Combat;
+	TObjectPtr<UGobulinCameraFeedbackComponent> CameraFeedback;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UGobulinSwordCombatComponent> SwordCombat;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UGobulinSwordFeedbackComponent> SwordFeedback;
 
 	// ---------- Enhanced Input ----------
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
@@ -83,23 +108,39 @@ protected:
 	TObjectPtr<UInputAction> SprintAction;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
-	TObjectPtr<UInputAction> FireAction;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
-	TObjectPtr<UInputAction> AimAction;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
-	TObjectPtr<UInputAction> ReloadAction;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
-	TObjectPtr<UInputAction> MeleeAction;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
-	TObjectPtr<UInputAction> SwitchWeaponAction;
+	TObjectPtr<UInputAction> SwordAttackAction;
 
 	// ---------- Movement ----------
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement", meta = (ClampMin = "0.0"))
 	float SprintSpeedMultiplier = 1.35f;
+
+	/** 剑处于挥砍阶段时的移动速度倍率。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement|Sword", meta = (ClampMin = "0.0"))
+	float SwordAttackMoveSpeedMultiplier = 0.85f;
+
+	/** 剑处于收招阶段时的移动速度倍率。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement|Sword", meta = (ClampMin = "0.0"))
+	float SwordRecoveryMoveSpeedMultiplier = 1.0f;
+
+	/** 挥砍阶段是否允许跳跃输入。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement|Sword")
+	bool bAllowJumpDuringSwordAttack = false;
+
+	/** 收招阶段是否允许跳跃输入。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement|Sword")
+	bool bAllowJumpDuringSwordRecovery = false;
+
+	/** 挥砍阶段是否允许冲刺输入。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement|Sword")
+	bool bAllowSprintDuringSwordAttack = false;
+
+	/** 收招阶段是否允许冲刺输入。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement|Sword")
+	bool bAllowSprintDuringSwordRecovery = false;
+
+	/** 剑攻击真正开始时是否立即取消冲刺。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement|Sword")
+	bool bCancelSprintOnSwordAttack = true;
 
 	bool bSprinting = false;
 	bool bDead = false;
@@ -110,17 +151,17 @@ protected:
 	void JumpCompleted();
 	void SprintStarted();
 	void SprintCompleted();
-	void FireStarted();
-	void FireCompleted();
-	void AimStarted();
-	void AimCompleted();
-	void ReloadStarted();
-	void MeleeStarted();
-	void MeleeCompleted();
-	void SwitchWeaponStarted();
+	void SwordAttackStarted();
+	void SwordAttackCompleted();
 
 	void ApplyMovementSettings();
 	void Die();
+
+	bool CanJumpDuringSwordState() const;
+	bool CanSprintDuringSwordState() const;
+
+	UFUNCTION()
+	void OnSwordAttackStateChanged(EGobulinSwordAttackState PreviousState, EGobulinSwordAttackState NewState);
 
 	UFUNCTION()
 	void OnAttributeChanged(FGameplayTag AttributeTag, float NewValue);

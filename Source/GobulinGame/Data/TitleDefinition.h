@@ -28,7 +28,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Identity")
 	ETitleFunction SecondaryFunction = ETitleFunction::Tank;
 
-	/** 开局武器偏好（W01-W10） */
+	/** 开局武器偏好 ID。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Loadout")
 	TArray<FName> PreferredWeaponIds;
 

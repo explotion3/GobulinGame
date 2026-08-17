@@ -3,44 +3,6 @@
 #include "CoreMinimal.h"
 #include "GameTypes.generated.h"
 
-/** 武器类型：攻击方式 */
-UENUM(BlueprintType)
-enum class EWeaponType : uint8
-{
-	Melee			UMETA(DisplayName = "Melee"),
-	Precision		UMETA(DisplayName = "Precision"),
-	Rapid			UMETA(DisplayName = "Rapid"),
-	Spell			UMETA(DisplayName = "Spell"),
-	Heavy			UMETA(DisplayName = "Heavy"),
-	Thrown			UMETA(DisplayName = "Thrown"),
-	Tracking		UMETA(DisplayName = "Tracking"),
-	Ultimate		UMETA(DisplayName = "Ultimate")
-};
-
-/** 武器作用：功能定位 */
-UENUM(BlueprintType)
-enum class EWeaponFunction : uint8
-{
-	HordeClear		UMETA(DisplayName = "HordeClear"),
-	SingleTarget	UMETA(DisplayName = "SingleTarget"),
-	Control			UMETA(DisplayName = "Control"),
-	ArmorBreak		UMETA(DisplayName = "ArmorBreak"),
-	EnergyReturn	UMETA(DisplayName = "EnergyReturn"),
-	Economy			UMETA(DisplayName = "Economy")
-};
-
-/** 弹药类型 */
-UENUM(BlueprintType)
-enum class EAmmoType : uint8
-{
-	None		UMETA(DisplayName = "None"),
-	Arrows		UMETA(DisplayName = "Arrows"),
-	Mana		UMETA(DisplayName = "Mana"),
-	Alchemy		UMETA(DisplayName = "Alchemy"),
-	Charge		UMETA(DisplayName = "Charge"),
-	Special		UMETA(DisplayName = "Special")
-};
-
 /** 称号类型：战斗风格 */
 UENUM(BlueprintType)
 enum class ETitleType : uint8

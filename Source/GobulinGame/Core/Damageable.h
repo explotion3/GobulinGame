@@ -25,6 +25,43 @@ struct GOBULINGAME_API FDamageInfo
 	bool bIsCritical = false;
 };
 
+UENUM(BlueprintType)
+enum class EDamageResultType : uint8
+{
+	Invalid,
+	Applied,
+	Blocked,
+	Immune,
+	AlreadyDead
+};
+
+/** Result returned by a damageable target after processing a damage request. */
+USTRUCT(BlueprintType)
+struct GOBULINGAME_API FDamageResult
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Damage")
+	EDamageResultType ResultType = EDamageResultType::Invalid;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Damage")
+	float RequestedAmount = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Damage")
+	float AppliedAmount = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Damage")
+	float RemainingHealth = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Damage")
+	bool bKilled = false;
+
+	bool DidApplyDamage() const
+	{
+		return ResultType == EDamageResultType::Applied && AppliedAmount > KINDA_SMALL_NUMBER;
+	}
+};
+
 /** 可受伤接口：玩家、敌人、建筑、魔王殿统一实现 */
 UINTERFACE(MinimalAPI, Blueprintable)
 class UDamageable : public UInterface
@@ -38,5 +75,5 @@ class GOBULINGAME_API IDamageable
 
 public:
 	UFUNCTION(BlueprintNativeEvent, Category = "Damage")
-	void TakeDamage(const FDamageInfo& DamageInfo);
+	FDamageResult TakeDamage(const FDamageInfo& DamageInfo);
 };

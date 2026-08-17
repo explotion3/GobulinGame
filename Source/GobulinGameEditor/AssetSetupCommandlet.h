@@ -5,7 +5,7 @@
 #include "AssetSetupCommandlet.generated.h"
 
 /**
- * 一次性资产生成命令：InputAction、IMC_Default、IMC_Player、W01/W03/W05、S01/S02。
+ * 一次性资产生成命令：玩家基础输入、IMC_Default、IMC_Player、Sword 曲线和数据资产。
  * 运行：UnrealEditor-Cmd.exe <uproject> -run=AssetSetup -unattended -nosplash -nullrhi
  */
 UCLASS()

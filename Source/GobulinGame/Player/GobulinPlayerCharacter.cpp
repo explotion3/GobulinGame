@@ -3,13 +3,18 @@
 #include "Camera/CameraComponent.h"
 #include "Combat/BattleAttributeComponent.h"
 #include "Combat/BattleAttributeSet.h"
-#include "Combat/FPSWeaponOverlayComponent.h"
-#include "Combat/PlayerCombatComponent.h"
+#include "Combat/GobulinSwordCombatComponent.h"
+#include "Combat/GobulinSwordFeedbackComponent.h"
+#include "Combat/GobulinWeaponViewComponent.h"
 #include "Core/BattleTags.h"
 #include "EnhancedInputComponent.h"
+#include "Components/ArrowComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "InputActionValue.h"
+#include "Player/GobulinCameraFeedbackComponent.h"
+#include "UObject/ConstructorHelpers.h"
 
 AGobulinPlayerCharacter::AGobulinPlayerCharacter()
 {
@@ -45,14 +50,39 @@ AGobulinPlayerCharacter::AGobulinPlayerCharacter()
 	FirstPersonCameraComponent->FirstPersonFieldOfView = 90.0f;
 	FirstPersonCameraComponent->FirstPersonScale = 1.0f;
 
-	FirstPersonWeaponOverlay = CreateDefaultSubobject<UFPSWeaponOverlayComponent>(TEXT("FirstPersonWeaponOverlay"));
-	FirstPersonWeaponOverlay->SetupAttachment(FirstPersonCameraComponent);
-	FirstPersonWeaponOverlay->SetOnlyOwnerSee(true);
-	FirstPersonWeaponOverlay->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	FirstPersonWeaponOverlay->SetCastShadow(false);
+	CameraFeedback = CreateDefaultSubobject<UGobulinCameraFeedbackComponent>(TEXT("CameraFeedback"));
+	CameraFeedback->SetCamera(FirstPersonCameraComponent);
+
+	FirstPersonWeaponView = CreateDefaultSubobject<UGobulinWeaponViewComponent>(TEXT("FirstPersonWeaponView"));
+	FirstPersonWeaponView->SetupAttachment(FirstPersonCameraComponent);
+
+	FirstPersonWeaponVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FirstPersonWeaponVisual"));
+	FirstPersonWeaponVisual->SetupAttachment(FirstPersonWeaponView);
+	FirstPersonWeaponVisual->SetOnlyOwnerSee(true);
+	FirstPersonWeaponVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FirstPersonWeaponVisual->SetCastShadow(false);
+	FirstPersonWeaponVisual->SetReceivesDecals(false);
+	FirstPersonWeaponVisual->SetMobility(EComponentMobility::Movable);
+
+	FirstPersonSwordTip = CreateDefaultSubobject<UArrowComponent>(TEXT("FirstPersonSwordTip"));
+	FirstPersonSwordTip->SetupAttachment(FirstPersonWeaponVisual);
+	FirstPersonSwordTip->SetArrowLength(24.0f);
+	FirstPersonSwordTip->SetHiddenInGame(true);
+	FirstPersonSwordTip->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FirstPersonSwordTip->SetOnlyOwnerSee(true);
+
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlaneMesh(TEXT("/Engine/BasicShapes/Plane.Plane"));
+	if (PlaneMesh.Succeeded())
+	{
+		FirstPersonWeaponVisual->SetStaticMesh(PlaneMesh.Object);
+	}
+
+	FirstPersonWeaponView->SetVisualMesh(FirstPersonWeaponVisual);
 
 	Attributes = CreateDefaultSubobject<UBattleAttributeComponent>(TEXT("BattleAttributes"));
-	Combat = CreateDefaultSubobject<UPlayerCombatComponent>(TEXT("PlayerCombat"));
+	SwordCombat = CreateDefaultSubobject<UGobulinSwordCombatComponent>(TEXT("SwordCombat"));
+	SwordFeedback = CreateDefaultSubobject<UGobulinSwordFeedbackComponent>(TEXT("SwordFeedback"));
+	SwordFeedback->SetSwordCombat(SwordCombat);
 }
 
 void AGobulinPlayerCharacter::BeginPlay()
@@ -73,16 +103,54 @@ void AGobulinPlayerCharacter::BeginPlay()
 
 	ApplyMovementSettings();
 
-	if (Combat)
+	if (SwordCombat)
 	{
-		Combat->SetWeaponOverlay(FirstPersonWeaponOverlay);
-		Combat->SetComponentTickEnabled(IsLocallyControlled() || HasAuthority());
+		SwordCombat->SetWeaponView(FirstPersonWeaponView);
+		SwordCombat->SetSwordTip(FirstPersonSwordTip);
+		SwordCombat->OnAttackStateChanged.AddDynamic(this, &AGobulinPlayerCharacter::OnSwordAttackStateChanged);
 	}
 
-	if (FirstPersonWeaponOverlay && !IsLocallyControlled())
+	if (SwordFeedback)
 	{
-		FirstPersonWeaponOverlay->SetVisibility(false, true);
-		FirstPersonWeaponOverlay->SetComponentTickEnabled(false);
+		SwordFeedback->SetSwordCombat(SwordCombat);
+	}
+
+	if (!IsLocallyControlled())
+	{
+		if (FirstPersonWeaponView)
+		{
+			FirstPersonWeaponView->SetVisibility(false, false);
+		}
+		if (FirstPersonWeaponVisual)
+		{
+			FirstPersonWeaponVisual->SetVisibility(false, true);
+		}
+	}
+}
+
+void AGobulinPlayerCharacter::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+
+	if (FirstPersonWeaponView)
+	{
+		FirstPersonWeaponView->SetVisualMesh(FirstPersonWeaponVisual);
+	}
+
+	if (CameraFeedback)
+	{
+		CameraFeedback->SetCamera(FirstPersonCameraComponent);
+	}
+
+	if (SwordCombat && FirstPersonWeaponView)
+	{
+		FirstPersonWeaponView->SetSwordDefinition(SwordCombat->GetSwordDefinition());
+		SwordCombat->SetSwordTip(FirstPersonSwordTip);
+	}
+
+	if (SwordFeedback)
+	{
+		SwordFeedback->SetSwordCombat(SwordCombat);
 	}
 }
 
@@ -114,28 +182,10 @@ void AGobulinPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerI
 		EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Started, this, &AGobulinPlayerCharacter::SprintStarted);
 		EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Completed, this, &AGobulinPlayerCharacter::SprintCompleted);
 	}
-	if (FireAction)
+	if (SwordAttackAction)
 	{
-		EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Started, this, &AGobulinPlayerCharacter::FireStarted);
-		EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Completed, this, &AGobulinPlayerCharacter::FireCompleted);
-	}
-	if (AimAction)
-	{
-		EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Started, this, &AGobulinPlayerCharacter::AimStarted);
-		EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Completed, this, &AGobulinPlayerCharacter::AimCompleted);
-	}
-	if (ReloadAction)
-	{
-		EnhancedInputComponent->BindAction(ReloadAction, ETriggerEvent::Started, this, &AGobulinPlayerCharacter::ReloadStarted);
-	}
-	if (MeleeAction)
-	{
-		EnhancedInputComponent->BindAction(MeleeAction, ETriggerEvent::Started, this, &AGobulinPlayerCharacter::MeleeStarted);
-		EnhancedInputComponent->BindAction(MeleeAction, ETriggerEvent::Completed, this, &AGobulinPlayerCharacter::MeleeCompleted);
-	}
-	if (SwitchWeaponAction)
-	{
-		EnhancedInputComponent->BindAction(SwitchWeaponAction, ETriggerEvent::Started, this, &AGobulinPlayerCharacter::SwitchWeaponStarted);
+		EnhancedInputComponent->BindAction(SwordAttackAction, ETriggerEvent::Started, this, &AGobulinPlayerCharacter::SwordAttackStarted);
+		EnhancedInputComponent->BindAction(SwordAttackAction, ETriggerEvent::Completed, this, &AGobulinPlayerCharacter::SwordAttackCompleted);
 	}
 }
 
@@ -170,7 +220,7 @@ void AGobulinPlayerCharacter::LookInput(const FInputActionValue& Value)
 
 void AGobulinPlayerCharacter::JumpStarted()
 {
-	if (!bDead)
+	if (!bDead && CanJumpDuringSwordState())
 	{
 		Jump();
 	}
@@ -191,67 +241,22 @@ void AGobulinPlayerCharacter::SprintCompleted()
 	SetSprinting(false);
 }
 
-void AGobulinPlayerCharacter::FireStarted()
+void AGobulinPlayerCharacter::SwordAttackStarted()
 {
-	if (!bDead && Combat)
+	if (bDead || !SwordCombat)
 	{
-		Combat->StartFire();
+		return;
 	}
+
+	SwordCombat->SetAttackInputHeld(true);
+	SwordCombat->StartAttack();
 }
 
-void AGobulinPlayerCharacter::FireCompleted()
+void AGobulinPlayerCharacter::SwordAttackCompleted()
 {
-	if (Combat)
+	if (SwordCombat)
 	{
-		Combat->StopFire();
-	}
-}
-
-void AGobulinPlayerCharacter::AimStarted()
-{
-	if (Combat)
-	{
-		Combat->SetAiming(true);
-	}
-}
-
-void AGobulinPlayerCharacter::AimCompleted()
-{
-	if (Combat)
-	{
-		Combat->SetAiming(false);
-	}
-}
-
-void AGobulinPlayerCharacter::ReloadStarted()
-{
-	if (!bDead && Combat)
-	{
-		Combat->Reload();
-	}
-}
-
-void AGobulinPlayerCharacter::MeleeStarted()
-{
-	if (!bDead && Combat)
-	{
-		Combat->StartMelee();
-	}
-}
-
-void AGobulinPlayerCharacter::MeleeCompleted()
-{
-	if (Combat)
-	{
-		Combat->StopFire();
-	}
-}
-
-void AGobulinPlayerCharacter::SwitchWeaponStarted()
-{
-	if (!bDead && Combat)
-	{
-		Combat->SwitchWeapon(1);
+		SwordCombat->SetAttackInputHeld(false);
 	}
 }
 
@@ -261,9 +266,63 @@ void AGobulinPlayerCharacter::SetSprinting(bool bInSprinting)
 	{
 		bSprinting = false;
 	}
+	else if (bInSprinting && !CanSprintDuringSwordState())
+	{
+		bSprinting = false;
+	}
 	else
 	{
 		bSprinting = bInSprinting;
+	}
+
+	ApplyMovementSettings();
+}
+
+bool AGobulinPlayerCharacter::CanJumpDuringSwordState() const
+{
+	if (!SwordCombat)
+	{
+		return true;
+	}
+
+	switch (SwordCombat->GetAttackState())
+	{
+	case EGobulinSwordAttackState::Attacking:
+		return bAllowJumpDuringSwordAttack;
+	case EGobulinSwordAttackState::Recovery:
+		return bAllowJumpDuringSwordRecovery;
+	default:
+		return true;
+	}
+}
+
+bool AGobulinPlayerCharacter::CanSprintDuringSwordState() const
+{
+	if (!SwordCombat)
+	{
+		return true;
+	}
+
+	switch (SwordCombat->GetAttackState())
+	{
+	case EGobulinSwordAttackState::Attacking:
+		return bAllowSprintDuringSwordAttack;
+	case EGobulinSwordAttackState::Recovery:
+		return bAllowSprintDuringSwordRecovery;
+	default:
+		return true;
+	}
+}
+
+void AGobulinPlayerCharacter::OnSwordAttackStateChanged(
+	EGobulinSwordAttackState PreviousState,
+	EGobulinSwordAttackState NewState)
+{
+	(void)PreviousState;
+
+	if (NewState == EGobulinSwordAttackState::Attacking && bCancelSprintOnSwordAttack)
+	{
+		bSprinting = false;
 	}
 
 	ApplyMovementSettings();
@@ -282,9 +341,25 @@ void AGobulinPlayerCharacter::ApplyMovementSettings()
 		MovementSpeed = Attributes->GetAttributeValue(BattleTag_Movement_Speed);
 	}
 
-	GetCharacterMovement()->MaxWalkSpeed = bSprinting
-		? MovementSpeed * SprintSpeedMultiplier
-		: MovementSpeed;
+	const bool bSwordAttackActive = SwordCombat && SwordCombat->GetAttackState() == EGobulinSwordAttackState::Attacking;
+	const bool bSwordRecoveryActive = SwordCombat && SwordCombat->GetAttackState() == EGobulinSwordAttackState::Recovery;
+	const bool bSprintActive = bSprinting && CanSprintDuringSwordState();
+
+	if (bSprintActive)
+	{
+		MovementSpeed *= SprintSpeedMultiplier;
+	}
+
+	if (bSwordAttackActive)
+	{
+		MovementSpeed *= SwordAttackMoveSpeedMultiplier;
+	}
+	else if (bSwordRecoveryActive)
+	{
+		MovementSpeed *= SwordRecoveryMoveSpeedMultiplier;
+	}
+
+	GetCharacterMovement()->MaxWalkSpeed = MovementSpeed;
 }
 
 void AGobulinPlayerCharacter::OnAttributeChanged(FGameplayTag AttributeTag, float NewValue)
@@ -295,21 +370,50 @@ void AGobulinPlayerCharacter::OnAttributeChanged(FGameplayTag AttributeTag, floa
 	}
 }
 
-void AGobulinPlayerCharacter::TakeDamage_Implementation(const FDamageInfo& DamageInfo)
+FDamageResult AGobulinPlayerCharacter::TakeDamage_Implementation(const FDamageInfo& DamageInfo)
 {
-	if (bDead || !Attributes || DamageInfo.Amount <= 0.0f)
+	FDamageResult Result;
+	Result.RequestedAmount = FMath::Max(0.0f, DamageInfo.Amount);
+
+	if (Attributes)
 	{
-		return;
+		Result.RemainingHealth = Attributes->GetAttributeValue(BattleTag_Health_Current);
+	}
+
+	if (bDead)
+	{
+		Result.ResultType = EDamageResultType::AlreadyDead;
+		return Result;
+	}
+
+	if (!Attributes || DamageInfo.Amount <= 0.0f)
+	{
+		Result.ResultType = EDamageResultType::Invalid;
+		return Result;
 	}
 
 	const float CurrentHealth = Attributes->GetAttributeValue(BattleTag_Health_Current);
-	const float NewHealth = FMath::Max(0.0f, CurrentHealth - DamageInfo.Amount);
+	if (CurrentHealth <= 0.0f)
+	{
+		Result.ResultType = EDamageResultType::AlreadyDead;
+		return Result;
+	}
+
+	const float AppliedAmount = FMath::Min(CurrentHealth, DamageInfo.Amount);
+	const float NewHealth = FMath::Max(0.0f, CurrentHealth - AppliedAmount);
 	Attributes->SetBaseAttribute(BattleTag_Health_Current, NewHealth, 0.0f, 99999.0f);
 
-	if (NewHealth <= 0.0f)
+	Result.ResultType = EDamageResultType::Applied;
+	Result.AppliedAmount = AppliedAmount;
+	Result.RemainingHealth = NewHealth;
+	Result.bKilled = NewHealth <= 0.0f;
+
+	if (Result.bKilled)
 	{
 		Die();
 	}
+
+	return Result;
 }
 
 float AGobulinPlayerCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
@@ -319,8 +423,8 @@ float AGobulinPlayerCharacter::TakeDamage(float DamageAmount, FDamageEvent const
 	DamageInfo.Amount = DamageAmount;
 	DamageInfo.Instigator = DamageCauser ? DamageCauser : (EventInstigator ? EventInstigator->GetPawn() : nullptr);
 	DamageInfo.DamageSourceId = TEXT("ClassicDamage");
-	IDamageable::Execute_TakeDamage(this, DamageInfo);
-	return DamageAmount;
+	const FDamageResult Result = IDamageable::Execute_TakeDamage(this, DamageInfo);
+	return Result.AppliedAmount;
 }
 
 void AGobulinPlayerCharacter::Die()
@@ -334,9 +438,9 @@ void AGobulinPlayerCharacter::Die()
 	bSprinting = false;
 	ApplyMovementSettings();
 
-	if (Combat)
+	if (SwordCombat)
 	{
-		Combat->StopFire();
+		SwordCombat->CancelAttack();
 	}
 
 	GetCharacterMovement()->StopMovementImmediately();

@@ -27,7 +27,7 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 
 	/** IDamageable：统一伤害入口 */
-	virtual void TakeDamage_Implementation(const FDamageInfo& DamageInfo) override;
+	virtual FDamageResult TakeDamage_Implementation(const FDamageInfo& DamageInfo) override;
 
 	/** 兼容经典伤害入口（UGameplayStatics::ApplyDamage 等） */
 	virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent,

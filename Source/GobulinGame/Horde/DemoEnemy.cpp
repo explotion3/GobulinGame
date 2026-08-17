@@ -133,23 +133,45 @@ void ADemoEnemy::ApplyNormalSprite()
 	}
 }
 
-void ADemoEnemy::TakeDamage_Implementation(const FDamageInfo& DamageInfo)
+FDamageResult ADemoEnemy::TakeDamage_Implementation(const FDamageInfo& DamageInfo)
 {
-	if (bDead || !Attributes)
+	FDamageResult Result;
+	Result.RequestedAmount = FMath::Max(0.0f, DamageInfo.Amount);
+
+	if (Attributes)
 	{
-		return;
+		Result.RemainingHealth = Attributes->GetAttributeValue(BattleTag_Health_Current);
+	}
+
+	if (bDead)
+	{
+		Result.ResultType = EDamageResultType::AlreadyDead;
+		return Result;
+	}
+
+	if (!Attributes || DamageInfo.Amount <= 0.0f)
+	{
+		Result.ResultType = EDamageResultType::Invalid;
+		return Result;
 	}
 
 	const float CurrentHealth = Attributes->GetAttributeValue(BattleTag_Health_Current);
 	if (CurrentHealth <= 0.0f)
 	{
-		return;
+		Result.ResultType = EDamageResultType::AlreadyDead;
+		return Result;
 	}
 
-	const float NewHealth = FMath::Max(0.0f, CurrentHealth - DamageInfo.Amount);
+	const float AppliedAmount = FMath::Min(CurrentHealth, DamageInfo.Amount);
+	const float NewHealth = FMath::Max(0.0f, CurrentHealth - AppliedAmount);
 	Attributes->SetBaseAttribute(BattleTag_Health_Current, NewHealth, 0.0f, 99999.0f);
 
-	if (NewHealth <= 0.0f)
+	Result.ResultType = EDamageResultType::Applied;
+	Result.AppliedAmount = AppliedAmount;
+	Result.RemainingHealth = NewHealth;
+	Result.bKilled = NewHealth <= 0.0f;
+
+	if (Result.bKilled)
 	{
 		Die();
 	}
@@ -157,6 +179,8 @@ void ADemoEnemy::TakeDamage_Implementation(const FDamageInfo& DamageInfo)
 	{
 		PlayHurtFeedback();
 	}
+
+	return Result;
 }
 
 void ADemoEnemy::PlayHurtFeedback()
@@ -205,8 +229,8 @@ float ADemoEnemy::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent
 	DamageInfo.Amount = DamageAmount;
 	DamageInfo.Instigator = DamageCauser ? DamageCauser : (EventInstigator ? EventInstigator->GetPawn() : nullptr);
 	DamageInfo.DamageSourceId = TEXT("ClassicDamage");
-	IDamageable::Execute_TakeDamage(this, DamageInfo);
-	return DamageAmount;
+	const FDamageResult Result = IDamageable::Execute_TakeDamage(this, DamageInfo);
+	return Result.AppliedAmount;
 }
 
 void ADemoEnemy::Die()

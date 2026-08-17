@@ -1,22 +1,27 @@
 #include "AssetSetupCommandlet.h"
 
 #include "AssetToolsModule.h"
-#include "Modules/ModuleManager.h"
-#include "FileHelpers.h"
+#include "Curves/CurveVector.h"
+#include "Data/GobulinSwordDefinition.h"
+#include "Factories/CurveFactory.h"
+#include "Factories/MaterialFactoryNew.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "InputActionValue.h"
 #include "InputCoreTypes.h"
 #include "InputModifiers.h"
-#include "Data/GameTypes.h"
 #include "Data/TitleDefinition.h"
-#include "Data/WeaponDefinition.h"
+#include "FileHelpers.h"
 #include "HAL/FileManager.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialExpressionTextureSampleParameter2D.h"
+#include "Modules/ModuleManager.h"
 #include "Misc/Paths.h"
+#include "UObject/UObjectGlobals.h"
 
 namespace
 {
-	UObject* CreateAssetInFolder(UClass* AssetClass, const FString& FolderPath, const FString& AssetName)
+	UObject* CreateAssetInFolder(UClass* AssetClass, const FString& FolderPath, const FString& AssetName, UFactory* Factory = nullptr)
 	{
 		const FString ObjectPath = FString::Printf(TEXT("%s/%s.%s"), *FolderPath, *AssetName, *AssetName);
 		if (UObject* ExistingAsset = LoadObject<UObject>(nullptr, *ObjectPath))
@@ -25,7 +30,7 @@ namespace
 		}
 
 		IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools").Get();
-		return AssetTools.CreateAsset(AssetName, FolderPath, AssetClass, nullptr);
+		return AssetTools.CreateAsset(AssetName, FolderPath, AssetClass, Factory);
 	}
 
 	bool SaveCreatedAssets(const TArray<UObject*>& Assets)
@@ -76,20 +81,89 @@ namespace
 			}
 		}
 	}
+
+	void SetVectorCurveKeys(UCurveVector* Curve, const TArray<TPair<float, FVector>>& Keys)
+	{
+		if (!Curve)
+		{
+			return;
+		}
+
+		for (FRichCurve& FloatCurve : Curve->FloatCurves)
+		{
+			FloatCurve.Reset();
+			FloatCurve.SetDefaultValue(0.0f);
+		}
+
+		for (const TPair<float, FVector>& Key : Keys)
+		{
+			const FVector& Value = Key.Value;
+			const float Components[3] = { Value.X, Value.Y, Value.Z };
+			for (int32 ComponentIndex = 0; ComponentIndex < 3; ++ComponentIndex)
+			{
+				const FKeyHandle KeyHandle = Curve->FloatCurves[ComponentIndex].AddKey(Key.Key, Components[ComponentIndex]);
+				FRichCurveKey& RichKey = Curve->FloatCurves[ComponentIndex].GetKey(KeyHandle);
+				RichKey.InterpMode = RCIM_Cubic;
+				RichKey.TangentMode = RCTM_Auto;
+			}
+		}
+
+		Curve->MarkPackageDirty();
+	}
+
+	UCurveVector* CreateSwordCurve(const FString& Folder, const FString& Name, const TArray<TPair<float, FVector>>& Keys)
+	{
+		UCurveVectorFactory* Factory = NewObject<UCurveVectorFactory>();
+		UCurveVector* Curve = Cast<UCurveVector>(CreateAssetInFolder(UCurveVector::StaticClass(), Folder, Name, Factory));
+		SetVectorCurveKeys(Curve, Keys);
+		return Curve;
+	}
+
+	UMaterial* CreateSwordMaterial(const FString& Folder, UTexture2D* SwordTexture)
+	{
+		UMaterialFactoryNew* Factory = NewObject<UMaterialFactoryNew>();
+		UMaterial* Material = Cast<UMaterial>(CreateAssetInFolder(UMaterial::StaticClass(), Folder, TEXT("M_GobulinWeaponView"), Factory));
+		if (!Material || Material->GetExpressionCollection().Expressions.Num() > 0)
+		{
+			return Material;
+		}
+
+		UMaterialExpressionTextureSampleParameter2D* TextureSample = NewObject<UMaterialExpressionTextureSampleParameter2D>(Material);
+		TextureSample->ParameterName = TEXT("WeaponTexture");
+		TextureSample->Texture = SwordTexture;
+		TextureSample->SamplerType = SAMPLERTYPE_Color;
+		Material->GetExpressionCollection().Expressions.Add(TextureSample);
+
+		if (UMaterialEditorOnlyData* EditorData = Material->GetEditorOnlyData())
+		{
+			EditorData->BaseColor.Expression = TextureSample;
+			EditorData->BaseColor.OutputIndex = 0;
+			EditorData->Opacity.Expression = TextureSample;
+			EditorData->Opacity.OutputIndex = 1;
+		}
+
+		Material->MaterialDomain = MD_Surface;
+		Material->BlendMode = BLEND_Translucent;
+		Material->TwoSided = true;
+		Material->SetShadingModel(MSM_Unlit);
+		Material->PostEditChange();
+		Material->MarkPackageDirty();
+		return Material;
+	}
 }
 
 int32 UAssetSetupCommandlet::Main(const FString& Params)
 {
 	const FString ActionsFolder = TEXT("/Game/Input/Actions");
 	const FString IMCFolder = TEXT("/Game/Input/IMC");
-	const FString WeaponsFolder = TEXT("/Game/Data/Weapons");
 	const FString TitlesFolder = TEXT("/Game/Data/Titles");
+	const FString SwordFolder = TEXT("/Game/Art/Weapon");
 
 	// 物理目录先行创建，确保 CreateAsset 路径可用
 	IFileManager::Get().MakeDirectory(*(FPaths::ProjectContentDir() / TEXT("Input/Actions")), true);
 	IFileManager::Get().MakeDirectory(*(FPaths::ProjectContentDir() / TEXT("Input/IMC")), true);
-	IFileManager::Get().MakeDirectory(*(FPaths::ProjectContentDir() / TEXT("Data/Weapons")), true);
 	IFileManager::Get().MakeDirectory(*(FPaths::ProjectContentDir() / TEXT("Data/Titles")), true);
+	IFileManager::Get().MakeDirectory(*(FPaths::ProjectContentDir() / TEXT("Art/Weapon")), true);
 
 	TArray<UObject*> CreatedAssets;
 
@@ -98,16 +172,12 @@ int32 UAssetSetupCommandlet::Main(const FString& Params)
 	UInputAction* IA_Look = CreateInputAction(ActionsFolder, TEXT("IA_Look"), EInputActionValueType::Axis2D);
 	UInputAction* IA_Jump = CreateInputAction(ActionsFolder, TEXT("IA_Jump"), EInputActionValueType::Boolean);
 	UInputAction* IA_Sprint = CreateInputAction(ActionsFolder, TEXT("IA_Sprint"), EInputActionValueType::Boolean);
-	UInputAction* IA_Fire = CreateInputAction(ActionsFolder, TEXT("IA_Fire"), EInputActionValueType::Boolean);
-	UInputAction* IA_Aim = CreateInputAction(ActionsFolder, TEXT("IA_Aim"), EInputActionValueType::Boolean);
-	UInputAction* IA_Reload = CreateInputAction(ActionsFolder, TEXT("IA_Reload"), EInputActionValueType::Boolean);
-	UInputAction* IA_Melee = CreateInputAction(ActionsFolder, TEXT("IA_Melee"), EInputActionValueType::Boolean);
-	UInputAction* IA_SwitchWeapon = CreateInputAction(ActionsFolder, TEXT("IA_SwitchWeapon"), EInputActionValueType::Axis1D);
+	UInputAction* IA_SwordAttack = CreateInputAction(ActionsFolder, TEXT("IA_SwordAttack"), EInputActionValueType::Boolean);
 	UInputAction* IA_Interact = CreateInputAction(ActionsFolder, TEXT("IA_Interact"), EInputActionValueType::Boolean);
 	UInputAction* IA_PostBounty = CreateInputAction(ActionsFolder, TEXT("IA_PostBounty"), EInputActionValueType::Boolean);
 	UInputAction* IA_Pause = CreateInputAction(ActionsFolder, TEXT("IA_Pause"), EInputActionValueType::Boolean);
 
-	for (UInputAction* Action : { IA_Move, IA_Look, IA_Jump, IA_Sprint, IA_Fire, IA_Aim, IA_Reload, IA_Melee, IA_SwitchWeapon, IA_Interact, IA_PostBounty, IA_Pause })
+	for (UInputAction* Action : { IA_Move, IA_Look, IA_Jump, IA_Sprint, IA_SwordAttack, IA_Interact, IA_PostBounty, IA_Pause })
 	{
 		if (Action)
 		{
@@ -132,12 +202,6 @@ int32 UAssetSetupCommandlet::Main(const FString& Params)
 		MapKeyWithModifiers(IMC_Default, IA_Look, EKeys::MouseY, { MakeSwizzle(IMC_Default) });
 		MapKeyWithModifiers(IMC_Default, IA_Jump, EKeys::SpaceBar, {});
 		MapKeyWithModifiers(IMC_Default, IA_Sprint, EKeys::LeftShift, {});
-		MapKeyWithModifiers(IMC_Default, IA_Fire, EKeys::LeftMouseButton, {});
-		MapKeyWithModifiers(IMC_Default, IA_Aim, EKeys::RightMouseButton, {});
-		MapKeyWithModifiers(IMC_Default, IA_Reload, EKeys::R, {});
-		MapKeyWithModifiers(IMC_Default, IA_Melee, EKeys::V, {});
-		MapKeyWithModifiers(IMC_Default, IA_SwitchWeapon, EKeys::One, {});
-		MapKeyWithModifiers(IMC_Default, IA_SwitchWeapon, EKeys::Two, {});
 		MapKeyWithModifiers(IMC_Default, IA_Interact, EKeys::E, {});
 		MapKeyWithModifiers(IMC_Default, IA_PostBounty, EKeys::T, {});
 		MapKeyWithModifiers(IMC_Default, IA_Pause, EKeys::Escape, {});
@@ -161,42 +225,47 @@ int32 UAssetSetupCommandlet::Main(const FString& Params)
 		MapKeyWithModifiers(IMC_Player, IA_Look, EKeys::MouseY, { MakeSwizzle(IMC_Player) });
 		MapKeyWithModifiers(IMC_Player, IA_Jump, EKeys::SpaceBar, {});
 		MapKeyWithModifiers(IMC_Player, IA_Sprint, EKeys::LeftShift, {});
-		MapKeyWithModifiers(IMC_Player, IA_Fire, EKeys::LeftMouseButton, {});
-		MapKeyWithModifiers(IMC_Player, IA_Aim, EKeys::RightMouseButton, {});
-		MapKeyWithModifiers(IMC_Player, IA_Reload, EKeys::R, {});
-		MapKeyWithModifiers(IMC_Player, IA_Melee, EKeys::V, {});
-		MapKeyWithModifiers(IMC_Player, IA_SwitchWeapon, EKeys::One, {});
-		MapKeyWithModifiers(IMC_Player, IA_SwitchWeapon, EKeys::Two, {});
+		MapKeyWithModifiers(IMC_Player, IA_SwordAttack, EKeys::LeftMouseButton, {});
 	}
 
-	// ---------- Weapons (W01 / W03 / W05) ----------
-	auto CreateWeapon = [&](const FString& Name, FName WeaponId, EWeaponType Type, EWeaponFunction Primary, EWeaponFunction Secondary, EAmmoType Ammo, float BaseDamage, float FireRate, float Spread, float ProjectileSpeed, float FalloffStart, float FalloffEnd) -> UWeaponDefinition*
-	{
-		UWeaponDefinition* Definition = Cast<UWeaponDefinition>(CreateAssetInFolder(UWeaponDefinition::StaticClass(), WeaponsFolder, Name));
-		if (!Definition)
-		{
-			return nullptr;
-		}
-		Definition->WeaponId = WeaponId;
-		Definition->WeaponType = Type;
-		Definition->PrimaryFunction = Primary;
-		Definition->SecondaryFunction = Secondary;
-		Definition->AmmoType = Ammo;
-		Definition->BaseDamage = BaseDamage;
-		Definition->FireRate = FireRate;
-		Definition->Spread = Spread;
-		Definition->ProjectileSpeed = ProjectileSpeed;
-		Definition->FalloffStartDistance = FalloffStart;
-		Definition->FalloffEndDistance = FalloffEnd;
-		Definition->MaxTier = 5;
-		Definition->ModSlotCount = 3;
-		CreatedAssets.Add(Definition);
-		return Definition;
-	};
+	// ---------- Sword ----------
+	UTexture2D* SwordTexture = LoadObject<UTexture2D>(nullptr, TEXT("/Game/Art/Weapon/Sword.Sword"));
+	UMaterial* SwordMaterial = CreateSwordMaterial(SwordFolder, SwordTexture);
+	UCurveVector* SwordLocationCurve = CreateSwordCurve(SwordFolder, TEXT("CV_Sword_AttackLocation"), {
+		{ 0.0f, FVector::ZeroVector },
+		{ 0.18f, FVector(0.0f, 16.0f, -12.0f) },
+		{ 0.45f, FVector(-8.0f, -50.0f, 26.0f) },
+		{ 0.65f, FVector(-2.0f, -20.0f, 10.0f) },
+		{ 1.0f, FVector::ZeroVector }
+	});
+	UCurveVector* SwordRotationCurve = CreateSwordCurve(SwordFolder, TEXT("CV_Sword_AttackRotation"), {
+		{ 0.0f, FVector::ZeroVector },
+		{ 0.18f, FVector(-8.0f, 0.0f, 20.0f) },
+		{ 0.45f, FVector(8.0f, 0.0f, -80.0f) },
+		{ 0.65f, FVector(2.0f, 0.0f, -30.0f) },
+		{ 1.0f, FVector::ZeroVector }
+	});
+	CreatedAssets.AddUnique(SwordMaterial);
+	CreatedAssets.AddUnique(SwordLocationCurve);
+	CreatedAssets.AddUnique(SwordRotationCurve);
 
-	CreateWeapon(TEXT("W01"), TEXT("W01"), EWeaponType::Melee, EWeaponFunction::HordeClear, EWeaponFunction::EnergyReturn, EAmmoType::None, 20.0f, 2.22f, 0.0f, 0.0f, 0.0f, 0.0f);
-	CreateWeapon(TEXT("W03"), TEXT("W03"), EWeaponType::Precision, EWeaponFunction::SingleTarget, EWeaponFunction::ArmorBreak, EAmmoType::Arrows, 45.0f, 1.2f, 0.0f, 3000.0f, 1500.0f, 4500.0f);
-	CreateWeapon(TEXT("W05"), TEXT("W05"), EWeaponType::Spell, EWeaponFunction::HordeClear, EWeaponFunction::Control, EAmmoType::Mana, 25.0f, 2.0f, 0.0f, 2500.0f, 0.0f, 0.0f);
+	UGobulinSwordDefinition* SwordDefinition = Cast<UGobulinSwordDefinition>(CreateAssetInFolder(UGobulinSwordDefinition::StaticClass(), SwordFolder, TEXT("DA_Sword")));
+	if (SwordDefinition)
+	{
+		SwordDefinition->WeaponTexture = SwordTexture;
+		SwordDefinition->WeaponMaterial = SwordMaterial;
+		SwordDefinition->AttackLocationCurve = SwordLocationCurve;
+		SwordDefinition->AttackRotationCurve = SwordRotationCurve;
+		SwordDefinition->HitWindowStartNormalizedTime = 0.18f;
+		SwordDefinition->HitWindowEndNormalizedTime = 0.65f;
+		SwordDefinition->InputBufferOpenNormalizedTime = 0.75f;
+		SwordDefinition->SwingSoundNormalizedTime = 0.20f;
+		SwordDefinition->HitCameraShakeScale = 1.0f;
+		SwordDefinition->TipTraceRadius = 6.0f;
+		SwordDefinition->DamageSourceId = TEXT("Sword");
+		SwordDefinition->MarkPackageDirty();
+		CreatedAssets.Add(SwordDefinition);
+	}
 
 	// ---------- Titles (S01 / S02) ----------
 	auto CreateTitle = [&](const FString& Name, FName TitleId, ETitleType Type, ETitleFunction Primary, ETitleFunction Secondary, const TArray<FName>& PreferredWeapons) -> UTitleDefinition*
@@ -215,8 +284,8 @@ int32 UAssetSetupCommandlet::Main(const FString& Params)
 		return Definition;
 	};
 
-	CreateTitle(TEXT("S01"), TEXT("S01"), ETitleType::Melee, ETitleFunction::Tank, ETitleFunction::Damage, { TEXT("W01"), TEXT("W05") });
-	CreateTitle(TEXT("S02"), TEXT("S02"), ETitleType::Spell, ETitleFunction::Damage, ETitleFunction::Control, { TEXT("W05"), TEXT("W03") });
+	CreateTitle(TEXT("S01"), TEXT("S01"), ETitleType::Melee, ETitleFunction::Tank, ETitleFunction::Damage, { TEXT("Sword") });
+	CreateTitle(TEXT("S02"), TEXT("S02"), ETitleType::Spell, ETitleFunction::Damage, ETitleFunction::Control, { TEXT("Sword") });
 
 	const bool bSaved = SaveCreatedAssets(CreatedAssets);
 	UE_LOG(LogTemp, Warning, TEXT("[AssetSetup] Created %d assets, saved=%s"), CreatedAssets.Num(), bSaved ? TEXT("true") : TEXT("false"));
