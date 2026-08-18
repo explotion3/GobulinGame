@@ -32,11 +32,14 @@ public class GobulinGame : ModuleRules
 			"MassRepresentation",
 			"MassReplication",
 			"Niagara",
+			"Paper2D",
 			"UMG",
 			"Slate"
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] { });
+		PrivateDependencyModuleNames.AddRange(new string[] {
+			"NavigationSystem"
+		});
 
 		PublicIncludePaths.AddRange(new string[] {
 			"GobulinGame",

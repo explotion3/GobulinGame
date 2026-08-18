@@ -14,7 +14,10 @@ public class GobulinGameEditor : ModuleRules
 			"UnrealEd",
 			"AssetTools",
 			"EnhancedInput",
-			"GobulinGame"
+			"GobulinGame",
+			"Paper2D",
+			"Slate",
+			"SlateCore"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });

@@ -45,6 +45,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "Paper2D",
+			"Enabled": true
+		},
+		{
 			"Name": "CommonUI",
 			"Enabled": true
 		}

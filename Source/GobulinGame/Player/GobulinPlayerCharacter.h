@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Core/Damageable.h"
+#include "Combat/CombatantEndpoint.h"
 #include "Combat/GobulinSwordCombatComponent.h"
 #include "GameFramework/Character.h"
 #include "GameplayTagContainer.h"
@@ -22,7 +22,7 @@ struct FInputActionValue;
  * 第一把剑的攻击逻辑由 UGobulinSwordCombatComponent 管理。
  */
 UCLASS()
-class GOBULINGAME_API AGobulinPlayerCharacter : public ACharacter, public IDamageable
+class GOBULINGAME_API AGobulinPlayerCharacter : public ACharacter, public ICombatantEndpoint
 {
 	GENERATED_BODY()
 
@@ -30,16 +30,16 @@ public:
 	AGobulinPlayerCharacter();
 
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
-	//~Begin IDamageable interface
-	virtual FDamageResult TakeDamage_Implementation(const FDamageInfo& DamageInfo) override;
-	//~End IDamageable interface
+	//~Begin ICombatantEndpoint interface
+	virtual FCombatDamageResult ResolveCombatDamage_Implementation(const FCombatDamageRequest& Request) override;
+	//~End ICombatantEndpoint interface
 
-	/** 兼容 UGameplayStatics::ApplyDamage 等经典伤害入口。 */
-	virtual float TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
-		AController* EventInstigator, AActor* DamageCauser) override;
+	UFUNCTION(BlueprintPure, Category = "Player|Combat")
+	FCombatantHandle GetCombatantHandle() const { return CombatantHandle; }
 
 	UFUNCTION(BlueprintPure, Category = "Player")
 	UCameraComponent* GetFirstPersonCameraComponent() const { return FirstPersonCameraComponent; }
@@ -144,6 +144,13 @@ protected:
 
 	bool bSprinting = false;
 	bool bDead = false;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat")
+	FCombatantHandle CombatantHandle;
+
+	/** 玩家作为战斗目标注册时使用的队伍；默认与 SpawnArea 的敌人队伍 0 敌对。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat")
+	uint8 CombatTeamId = 1;
 
 	void MoveInput(const FInputActionValue& Value);
 	void LookInput(const FInputActionValue& Value);

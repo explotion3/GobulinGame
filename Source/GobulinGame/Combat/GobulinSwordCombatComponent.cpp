@@ -1,8 +1,13 @@
 #include "Combat/GobulinSwordCombatComponent.h"
 
 #include "CollisionQueryParams.h"
+#include "Combat/CombatantRegistrySubsystem.h"
+#include "Combat/CombatEventSubsystem.h"
+#include "Combat/CombatSubsystem.h"
+#include "Combat/DamageProtocol.h"
 #include "Combat/GobulinWeaponViewComponent.h"
-#include "Core/Damageable.h"
+#include "Core/CombatTags.h"
+#include "Core/GobulinCollisionChannels.h"
 #include "Data/GobulinSwordDefinition.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
@@ -34,6 +39,23 @@ void UGobulinSwordCombatComponent::BeginPlay()
 	{
 		UE_LOG(LogGobulinSword, Warning, TEXT("SwordCombat on %s has no SwordTip component; attacks will have no melee trace."), *GetNameSafe(GetOwner()));
 	}
+
+	if (UCombatEventSubsystem* Events = GetWorld() ? GetWorld()->GetSubsystem<UCombatEventSubsystem>() : nullptr)
+	{
+		DamageResolvedDelegateHandle = Events->OnDamageResolved().AddUObject(
+			this,
+			&UGobulinSwordCombatComponent::HandleDamageResolved);
+	}
+}
+
+void UGobulinSwordCombatComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UCombatEventSubsystem* Events = GetWorld() ? GetWorld()->GetSubsystem<UCombatEventSubsystem>() : nullptr)
+	{
+		Events->OnDamageResolved().Remove(DamageResolvedDelegateHandle);
+	}
+	PendingDamageCommands.Reset();
+	Super::EndPlay(EndPlayReason);
 }
 
 void UGobulinSwordCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -273,7 +295,7 @@ void UGobulinSwordCombatComponent::ProcessSwordTipTrace(const FVector& Start, co
 		Start,
 		End,
 		FQuat::Identity,
-		ECC_Visibility,
+		GobulinCollision::CombatTrace,
 		FCollisionShape::MakeSphere(SwordDefinition->TipTraceRadius),
 		QueryParams);
 
@@ -290,22 +312,24 @@ void UGobulinSwordCombatComponent::ProcessSwordTipTrace(const FVector& Start, co
 			continue;
 		}
 
-		if (IDamageable* Damageable = Cast<IDamageable>(HitActor))
+		UCombatantRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UCombatantRegistrySubsystem>();
+		UCombatSubsystem* Combat = GetWorld()->GetSubsystem<UCombatSubsystem>();
+		const FCombatantHandle Target = Registry ? Registry->FindHandleForActor(HitActor) : FCombatantHandle();
+		if (Target.IsSet() && Combat)
 		{
-			const TWeakObjectPtr<AActor> WeakHitActor(HitActor);
-			if (!DamagedActorsThisAttack.Contains(WeakHitActor))
+			if (!DamagedTargetsThisAttack.Contains(Target))
 			{
-				DamagedActorsThisAttack.Add(WeakHitActor);
+				DamagedTargetsThisAttack.Add(Target);
 
-				FDamageInfo DamageInfo;
-				DamageInfo.Amount = SwordDefinition->BaseDamage;
-				DamageInfo.Instigator = OwnerActor;
-				DamageInfo.DamageSourceId = SwordDefinition->DamageSourceId;
-				const FDamageResult DamageResult = Damageable->Execute_TakeDamage(HitActor, DamageInfo);
-				if (DamageResult.DidApplyDamage())
-				{
-					NotifyHitConfirmed(HitActor, Hit, DamageResult);
-				}
+				FCombatDamageRequest Request;
+				Request.Source = Registry->FindHandleForActor(OwnerActor);
+				Request.Target = Target;
+				Request.BaseAmount = SwordDefinition->BaseDamage;
+				Request.AttackTag = CombatTag_Attack_Melee;
+				Request.DamageType = CombatTag_Damage_Physical;
+				Request.HitLocation = Hit.bBlockingHit ? Hit.ImpactPoint : Hit.Location;
+				Request.HitNormal = Hit.bBlockingHit ? Hit.ImpactNormal : FVector::UpVector;
+				PendingDamageCommands.Add(Combat->SubmitDamage(MoveTemp(Request)));
 			}
 		}
 		else if (Hit.bBlockingHit)
@@ -324,24 +348,40 @@ void UGobulinSwordCombatComponent::ProcessSwordTipTrace(const FVector& Start, co
 #endif
 }
 
+void UGobulinSwordCombatComponent::HandleDamageResolved(const FCombatDamageResolvedEvent& Event)
+{
+	if (!PendingDamageCommands.Remove(Event.Result.CommandId))
+	{
+		return;
+	}
+
+	if (Event.Result.DidApplyDamage())
+	{
+		NotifyHitConfirmed(
+			Event.Result.Target,
+			Event.Request.HitLocation,
+			Event.Request.HitNormal,
+			Event.Result);
+	}
+}
+
 void UGobulinSwordCombatComponent::NotifySwingTriggered()
 {
 	OnSwingTriggered.Broadcast();
 }
 
 void UGobulinSwordCombatComponent::NotifyHitConfirmed(
-	AActor* HitActor,
-	const FHitResult& Hit,
-	const FDamageResult& DamageResult)
+	FCombatantHandle Target,
+	const FVector& HitLocation,
+	const FVector& HitNormal,
+	const FCombatDamageResult& DamageResult)
 {
-	const FVector HitLocation = Hit.bBlockingHit ? Hit.ImpactPoint : Hit.Location;
-	const FVector HitNormal = Hit.bBlockingHit ? Hit.ImpactNormal : FVector::UpVector;
-	OnHitConfirmed.Broadcast(HitActor, HitLocation, HitNormal, DamageResult.AppliedAmount, DamageResult.bKilled);
+	OnHitConfirmed.Broadcast(Target, HitLocation, HitNormal, DamageResult.AppliedAmount, DamageResult.bKilled);
 }
 
 void UGobulinSwordCombatComponent::ResetAttackTraceState()
 {
 	PreviousSwordTipLocation = FVector::ZeroVector;
 	bHasPreviousSwordTipLocation = false;
-	DamagedActorsThisAttack.Reset();
+	DamagedTargetsThisAttack.Reset();
 }

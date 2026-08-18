@@ -2,12 +2,12 @@
 
 
 #include "ShooterProjectile.h"
+#include "Combat/CombatantRegistrySubsystem.h"
+#include "Combat/CombatSubsystem.h"
+#include "Combat/DamageProtocol.h"
 #include "Components/SphereComponent.h"
-#include "Core/Damageable.h"
+#include "Core/CombatTags.h"
 #include "GameFramework/ProjectileMovementComponent.h"
-#include "GameFramework/Character.h"
-#include "Kismet/GameplayStatics.h"
-#include "GameFramework/DamageType.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/Controller.h"
 #include "Engine/OverlapResult.h"
@@ -33,8 +33,6 @@ AShooterProjectile::AShooterProjectile()
 	ProjectileMovement->MaxSpeed = 3000.0f;
 	ProjectileMovement->bShouldBounce = true;
 
-	// set the default damage type
-	HitDamageType = UDamageType::StaticClass();
 }
 
 void AShooterProjectile::BeginPlay()
@@ -142,30 +140,28 @@ void AShooterProjectile::ExplosionCheck(const FVector& ExplosionCenter)
 
 void AShooterProjectile::ProcessHit(AActor* HitActor, UPrimitiveComponent* HitComp, const FVector& HitLocation, const FVector& HitDirection)
 {
-	// 统一伤害入口优先（敌人/建筑/魔王殿等实现 IDamageable）
-	if (IDamageable* Damageable = Cast<IDamageable>(HitActor))
+	if (HitActor && (HitActor != GetOwner() || bDamageOwner))
 	{
-		if (HitActor != GetOwner() || bDamageOwner)
+		UCombatantRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UCombatantRegistrySubsystem>();
+		UCombatSubsystem* Combat = GetWorld()->GetSubsystem<UCombatSubsystem>();
+		const FCombatantHandle Target = Registry ? Registry->FindHandleForActor(HitActor) : FCombatantHandle();
+		if (Target.IsSet() && Combat)
 		{
-			FDamageInfo DamageInfo;
-			DamageInfo.Amount = HitDamage;
-			DamageInfo.Instigator = GetInstigator();
-			DamageInfo.DamageSourceId = TEXT("ShooterProjectile");
-			Damageable->Execute_TakeDamage(HitActor, DamageInfo);
-		}
-	}
-	// 经典伤害入口（模板角色等仍走 TakeDamage）
-	else if (ACharacter* HitCharacter = Cast<ACharacter>(HitActor))
-	{
-		if (HitCharacter != GetOwner() || bDamageOwner)
-		{
-			UGameplayStatics::ApplyDamage(HitCharacter, HitDamage,
-				GetInstigator() ? GetInstigator()->GetController() : nullptr, this, HitDamageType);
+			FCombatDamageRequest Request;
+			Request.Source = Registry->FindHandleForActor(GetInstigator());
+			Request.Target = Target;
+			Request.BaseAmount = HitDamage;
+			Request.AttackTag = CombatTag_Attack_Projectile;
+			Request.DamageType = CombatTag_Damage_Physical;
+			Request.HitLocation = HitLocation;
+			Request.HitNormal = -HitDirection;
+			Request.Impulse = HitDirection * PhysicsForce;
+			Combat->SubmitDamage(MoveTemp(Request));
 		}
 	}
 
 	// have we hit a physics object?
-	if (HitComp->IsSimulatingPhysics())
+	if (HitComp && HitComp->IsSimulatingPhysics())
 	{
 		// give some physics impulse to the object
 		HitComp->AddImpulseAtLocation(HitDirection * PhysicsForce, HitLocation);

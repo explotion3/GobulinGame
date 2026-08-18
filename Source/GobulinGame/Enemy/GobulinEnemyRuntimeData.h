@@ -1,0 +1,101 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Combat/CombatantHandle.h"
+#include "Enemy/EnemyNavigationTypes.h"
+#include "Enemy/EnemyStateTypes.h"
+#include "UObject/PrimaryAssetId.h"
+#include "GobulinEnemyRuntimeData.generated.h"
+
+/**
+ * Immutable values derived from one archetype and one spawn request.
+ * These fields are deliberately flat so they can later move into a Mass const-shared fragment.
+ */
+USTRUCT(BlueprintType)
+struct GOBULINGAME_API FGobulinEnemyRuntimeStats
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	float MaxHealth = 1.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	float MoveSpeed = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	float TargetAcquisitionRadius = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	float TargetLoseRadius = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	float AttackReadyDistance = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	float ResumeMoveDistance = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	float DecisionInterval = 0.25f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	float NavigationRetryDelay = 1.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	float SpawnDuration = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	float DeathDuration = 0.0f;
+};
+
+/** Backend-neutral mutable data for one enemy instance. Contains no Actor or Mass handle. */
+USTRUCT(BlueprintType)
+struct GOBULINGAME_API FGobulinEnemyRuntimeData
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	FCombatantHandle Handle;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	FPrimaryAssetId ArchetypeId;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	FCombatantHandle Owner;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	FEnemyTargetData Target;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	uint8 TeamId = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	int32 EnemyLevel = 1;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	float PowerScale = 1.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	FGobulinEnemyRuntimeStats Stats;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	float CurrentHealth = 1.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	FEnemyStateData State;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	FEnemyMovementData Movement;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	float NextBehaviorUpdateTime = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	int32 EventSequence = 0;
+
+	bool IsAlive() const
+	{
+		return CurrentHealth > 0.0f
+			&& State.CurrentState != EEnemyState::Dying
+			&& State.CurrentState != EEnemyState::Inactive;
+	}
+};

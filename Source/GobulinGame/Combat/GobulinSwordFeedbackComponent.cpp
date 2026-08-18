@@ -67,7 +67,7 @@ void UGobulinSwordFeedbackComponent::HandleSwingTriggered()
 }
 
 void UGobulinSwordFeedbackComponent::HandleHitConfirmed(
-	AActor* /*HitActor*/,
+	FCombatantHandle /*Target*/,
 	FVector HitLocation,
 	FVector /*HitNormal*/,
 	float /*AppliedDamage*/,

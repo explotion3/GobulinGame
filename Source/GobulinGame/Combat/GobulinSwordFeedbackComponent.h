@@ -34,7 +34,7 @@ protected:
 	void HandleSwingTriggered();
 
 	UFUNCTION()
-	void HandleHitConfirmed(AActor* HitActor, FVector HitLocation, FVector HitNormal, float AppliedDamage, bool bKilled);
+	void HandleHitConfirmed(FCombatantHandle Target, FVector HitLocation, FVector HitNormal, float AppliedDamage, bool bKilled);
 
 	void BindToSwordCombat();
 	void UnbindFromSwordCombat();

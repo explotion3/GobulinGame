@@ -1,14 +1,15 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Combat/CombatantHandle.h"
 #include "Components/ActorComponent.h"
 #include "GobulinSwordCombatComponent.generated.h"
 
 class UGobulinSwordDefinition;
 class UGobulinWeaponViewComponent;
 class USceneComponent;
-class AActor;
-struct FDamageResult;
+struct FCombatDamageResolvedEvent;
+struct FCombatDamageResult;
 
 UENUM(BlueprintType)
 enum class EGobulinSwordAttackState : uint8
@@ -28,7 +29,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_FiveParams(
 	FGobulinSwordHitConfirmedSignature,
-	AActor*, HitActor,
+	FCombatantHandle, Target,
 	FVector, HitLocation,
 	FVector, HitNormal,
 	float, AppliedDamage,
@@ -44,6 +45,7 @@ public:
 	UGobulinSwordCombatComponent();
 
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sword")
@@ -127,14 +129,17 @@ protected:
 	FVector PreviousSwordTipLocation = FVector::ZeroVector;
 	bool bHasPreviousSwordTipLocation = false;
 	bool bSwingSoundPlayed = false;
-	TSet<TWeakObjectPtr<AActor>> DamagedActorsThisAttack;
+	TSet<FCombatantHandle> DamagedTargetsThisAttack;
+	TSet<FCombatCommandId> PendingDamageCommands;
+	FDelegateHandle DamageResolvedDelegateHandle;
 
 	bool StartAttackInternal();
 	void BeginRecovery();
 	void CompleteRecovery();
 	void SetAttackState(EGobulinSwordAttackState NewState);
 	void ProcessSwordTipTrace(const FVector& Start, const FVector& End);
+	void HandleDamageResolved(const FCombatDamageResolvedEvent& Event);
 	void NotifySwingTriggered();
-	void NotifyHitConfirmed(AActor* HitActor, const FHitResult& Hit, const FDamageResult& DamageResult);
+	void NotifyHitConfirmed(FCombatantHandle Target, const FVector& HitLocation, const FVector& HitNormal, const FCombatDamageResult& DamageResult);
 	void ResetAttackTraceState();
 };

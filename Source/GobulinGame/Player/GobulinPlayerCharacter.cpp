@@ -3,10 +3,12 @@
 #include "Camera/CameraComponent.h"
 #include "Combat/BattleAttributeComponent.h"
 #include "Combat/BattleAttributeSet.h"
+#include "Combat/CombatantRegistrySubsystem.h"
 #include "Combat/GobulinSwordCombatComponent.h"
 #include "Combat/GobulinSwordFeedbackComponent.h"
 #include "Combat/GobulinWeaponViewComponent.h"
 #include "Core/BattleTags.h"
+#include "Core/CombatTags.h"
 #include "EnhancedInputComponent.h"
 #include "Components/ArrowComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -89,6 +91,11 @@ void AGobulinPlayerCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
+	if (UCombatantRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UCombatantRegistrySubsystem>())
+	{
+		CombatantHandle = Registry->RegisterActor(this, CombatTeamId);
+	}
+
 	if (Attributes)
 	{
 		Attributes->SetBaseAttribute(BattleTag_Health_Max, 100.0f, 1.0f, 99999.0f);
@@ -126,6 +133,16 @@ void AGobulinPlayerCharacter::BeginPlay()
 			FirstPersonWeaponVisual->SetVisibility(false, true);
 		}
 	}
+}
+
+void AGobulinPlayerCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UCombatantRegistrySubsystem* Registry = GetWorld() ? GetWorld()->GetSubsystem<UCombatantRegistrySubsystem>() : nullptr)
+	{
+		Registry->UnregisterHandle(CombatantHandle);
+	}
+	CombatantHandle.Reset();
+	Super::EndPlay(EndPlayReason);
 }
 
 void AGobulinPlayerCharacter::OnConstruction(const FTransform& Transform)
@@ -370,42 +387,61 @@ void AGobulinPlayerCharacter::OnAttributeChanged(FGameplayTag AttributeTag, floa
 	}
 }
 
-FDamageResult AGobulinPlayerCharacter::TakeDamage_Implementation(const FDamageInfo& DamageInfo)
+FCombatDamageResult AGobulinPlayerCharacter::ResolveCombatDamage_Implementation(const FCombatDamageRequest& Request)
 {
-	FDamageResult Result;
-	Result.RequestedAmount = FMath::Max(0.0f, DamageInfo.Amount);
+	FCombatDamageResult Result;
+	Result.CommandId = Request.CommandId;
+	Result.Source = Request.Source;
+	Result.Target = Request.Target;
+	Result.RequestedAmount = FMath::IsFinite(Request.BaseAmount) ? FMath::Max(0.0f, Request.BaseAmount) : 0.0f;
 
 	if (Attributes)
 	{
 		Result.RemainingHealth = Attributes->GetAttributeValue(BattleTag_Health_Current);
 	}
 
-	if (bDead)
+	if (Request.Target != CombatantHandle)
 	{
-		Result.ResultType = EDamageResultType::AlreadyDead;
+		Result.Result = ECombatDamageResult::InvalidTarget;
 		return Result;
 	}
 
-	if (!Attributes || DamageInfo.Amount <= 0.0f)
+	if (bDead)
 	{
-		Result.ResultType = EDamageResultType::Invalid;
+		Result.Result = ECombatDamageResult::AlreadyDead;
+		return Result;
+	}
+
+	if (!Attributes || !Request.IsValid())
+	{
+		Result.Result = ECombatDamageResult::InvalidRequest;
 		return Result;
 	}
 
 	const float CurrentHealth = Attributes->GetAttributeValue(BattleTag_Health_Current);
 	if (CurrentHealth <= 0.0f)
 	{
-		Result.ResultType = EDamageResultType::AlreadyDead;
+		Result.Result = ECombatDamageResult::AlreadyDead;
 		return Result;
 	}
 
-	const float AppliedAmount = FMath::Min(CurrentHealth, DamageInfo.Amount);
+	const float MaximumAppliedAmount = Request.HasFlag(ECombatDamageFlags::CannotKill)
+		? FMath::Max(0.0f, CurrentHealth - 1.0f)
+		: CurrentHealth;
+	const float AppliedAmount = FMath::Min(MaximumAppliedAmount, Request.BaseAmount);
+	if (AppliedAmount <= KINDA_SMALL_NUMBER)
+	{
+		Result.Result = ECombatDamageResult::Blocked;
+		return Result;
+	}
+
 	const float NewHealth = FMath::Max(0.0f, CurrentHealth - AppliedAmount);
 	Attributes->SetBaseAttribute(BattleTag_Health_Current, NewHealth, 0.0f, 99999.0f);
 
-	Result.ResultType = EDamageResultType::Applied;
+	Result.Result = ECombatDamageResult::Applied;
 	Result.AppliedAmount = AppliedAmount;
 	Result.RemainingHealth = NewHealth;
+	Result.ReactionTag = CombatTag_Reaction_Hit;
 	Result.bKilled = NewHealth <= 0.0f;
 
 	if (Result.bKilled)
@@ -414,17 +450,6 @@ FDamageResult AGobulinPlayerCharacter::TakeDamage_Implementation(const FDamageIn
 	}
 
 	return Result;
-}
-
-float AGobulinPlayerCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
-	AController* EventInstigator, AActor* DamageCauser)
-{
-	FDamageInfo DamageInfo;
-	DamageInfo.Amount = DamageAmount;
-	DamageInfo.Instigator = DamageCauser ? DamageCauser : (EventInstigator ? EventInstigator->GetPawn() : nullptr);
-	DamageInfo.DamageSourceId = TEXT("ClassicDamage");
-	const FDamageResult Result = IDamageable::Execute_TakeDamage(this, DamageInfo);
-	return Result.AppliedAmount;
 }
 
 void AGobulinPlayerCharacter::Die()
@@ -437,6 +462,13 @@ void AGobulinPlayerCharacter::Die()
 	bDead = true;
 	bSprinting = false;
 	ApplyMovementSettings();
+
+	if (UCombatantRegistrySubsystem* Registry = GetWorld()
+		? GetWorld()->GetSubsystem<UCombatantRegistrySubsystem>()
+		: nullptr)
+	{
+		Registry->SetCombatantActive(CombatantHandle, false);
+	}
 
 	if (SwordCombat)
 	{
