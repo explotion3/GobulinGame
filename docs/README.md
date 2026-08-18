@@ -2,7 +2,7 @@
 
 > 工作名：《魔王城》（暂定）  
 > 引擎：Unreal Engine 5.8  
-> 最后更新：2026-08-18  
+> 最后更新：2026-08-19  
 > 当前状态：M1 单机基础垂直切片开发中
 
 ## 文档使用规则
@@ -39,6 +39,7 @@
 - `AGobulinPlayerController`：本地 Enhanced Input 上下文和相机管理入口。
 - `UBattleAttributeComponent`：玩家运行时属性容器。
 - `UGobulinCameraFeedbackComponent`：移动镜头反馈、侧倾和上下晃动。
+- `UGobulinPlayerStatusWidget`：当前原生 C++ 战斗反馈界面，显示生命、受伤红闪、死亡与重开入口；正式 UI 可用其蓝图子类替换。
 
 ### 第一把武器：剑
 
@@ -59,7 +60,7 @@
 ## 当前开发顺序
 
 1. 完成 SpawnArea 的 PIE 批量生成和战斗人工验收。
-2. 为最小敌人加入目标选择、移动和近战攻击阶段。
+2. 验收最小敌人的目标选择、移动、四方向表现、周期接触伤害和玩家临时状态 UI。
 3. 完成单机战斗垂直切片，再进入 Perk、悬赏和掉落等局内系统。
 4. 联机、Mass 敌潮和基地系统暂按 `future/` 与路线图规划推进。
 

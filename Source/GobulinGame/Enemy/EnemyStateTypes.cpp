@@ -21,12 +21,15 @@ bool FEnemyStateData::CanTransitionTo(EEnemyState NewState) const
 	case EEnemyState::Spawning:
 		return NewState == EEnemyState::SeekingTarget
 			|| NewState == EEnemyState::Moving
+			|| NewState == EEnemyState::HitReacting
+			|| NewState == EEnemyState::Staggered
 			|| NewState == EEnemyState::Dying;
 
 	case EEnemyState::SeekingTarget:
 		return NewState == EEnemyState::Moving
 			|| NewState == EEnemyState::ReadyToAttack
 			|| NewState == EEnemyState::AttackWindup
+			|| NewState == EEnemyState::HitReacting
 			|| NewState == EEnemyState::Staggered
 			|| NewState == EEnemyState::Dying;
 
@@ -34,6 +37,7 @@ bool FEnemyStateData::CanTransitionTo(EEnemyState NewState) const
 		return NewState == EEnemyState::SeekingTarget
 			|| NewState == EEnemyState::ReadyToAttack
 			|| NewState == EEnemyState::AttackWindup
+			|| NewState == EEnemyState::HitReacting
 			|| NewState == EEnemyState::Staggered
 			|| NewState == EEnemyState::Dying;
 
@@ -41,16 +45,19 @@ bool FEnemyStateData::CanTransitionTo(EEnemyState NewState) const
 		return NewState == EEnemyState::SeekingTarget
 			|| NewState == EEnemyState::Moving
 			|| NewState == EEnemyState::AttackWindup
+			|| NewState == EEnemyState::HitReacting
 			|| NewState == EEnemyState::Staggered
 			|| NewState == EEnemyState::Dying;
 
 	case EEnemyState::AttackWindup:
 		return NewState == EEnemyState::AttackActive
+			|| NewState == EEnemyState::HitReacting
 			|| NewState == EEnemyState::Staggered
 			|| NewState == EEnemyState::Dying;
 
 	case EEnemyState::AttackActive:
 		return NewState == EEnemyState::AttackRecovery
+			|| NewState == EEnemyState::HitReacting
 			|| NewState == EEnemyState::Staggered
 			|| NewState == EEnemyState::Dying;
 
@@ -59,6 +66,14 @@ bool FEnemyStateData::CanTransitionTo(EEnemyState NewState) const
 			|| NewState == EEnemyState::Moving
 			|| NewState == EEnemyState::ReadyToAttack
 			|| NewState == EEnemyState::AttackWindup
+			|| NewState == EEnemyState::HitReacting
+			|| NewState == EEnemyState::Staggered
+			|| NewState == EEnemyState::Dying;
+
+	case EEnemyState::HitReacting:
+		return NewState == EEnemyState::SeekingTarget
+			|| NewState == EEnemyState::Moving
+			|| NewState == EEnemyState::ReadyToAttack
 			|| NewState == EEnemyState::Staggered
 			|| NewState == EEnemyState::Dying;
 
@@ -66,6 +81,7 @@ bool FEnemyStateData::CanTransitionTo(EEnemyState NewState) const
 		return NewState == EEnemyState::SeekingTarget
 			|| NewState == EEnemyState::Moving
 			|| NewState == EEnemyState::ReadyToAttack
+			|| NewState == EEnemyState::HitReacting
 			|| NewState == EEnemyState::Dying;
 
 	case EEnemyState::Dying:

@@ -96,6 +96,14 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sword|Combat", meta = (ClampMin = "0.0"))
 	float BaseDamage = 20.0f;
 
+	/** 命中敌人时沿攻击者到目标方向施加的轻微水平速度。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sword|Combat", meta = (ClampMin = "0.0", Units = "cm/s"))
+	float HitKnockbackSpeed = 220.0f;
+
+	/** 命中敌人时附加的轻微垂直速度；致死时由敌人 Archetype 再放大。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sword|Combat", meta = (ClampMin = "0.0", Units = "cm/s"))
+	float HitLaunchSpeed = 90.0f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sword|Combat")
 	FName DamageSourceId = TEXT("Sword");
 };

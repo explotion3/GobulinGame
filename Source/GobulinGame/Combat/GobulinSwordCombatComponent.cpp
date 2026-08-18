@@ -329,6 +329,13 @@ void UGobulinSwordCombatComponent::ProcessSwordTipTrace(const FVector& Start, co
 				Request.DamageType = CombatTag_Damage_Physical;
 				Request.HitLocation = Hit.bBlockingHit ? Hit.ImpactPoint : Hit.Location;
 				Request.HitNormal = Hit.bBlockingHit ? Hit.ImpactNormal : FVector::UpVector;
+				FVector KnockbackDirection = (HitActor->GetActorLocation() - OwnerActor->GetActorLocation()).GetSafeNormal2D();
+				if (KnockbackDirection.IsNearlyZero())
+				{
+					KnockbackDirection = OwnerActor->GetActorForwardVector().GetSafeNormal2D();
+				}
+				Request.Impulse = KnockbackDirection * SwordDefinition->HitKnockbackSpeed
+					+ FVector::UpVector * SwordDefinition->HitLaunchSpeed;
 				PendingDamageCommands.Add(Combat->SubmitDamage(MoveTemp(Request)));
 			}
 		}

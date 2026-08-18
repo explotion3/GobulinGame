@@ -1,5 +1,7 @@
 #include "Enemy/GobulinEnemyArchetype.h"
 
+#include "Core/CombatTags.h"
+
 const FPrimaryAssetType UGobulinEnemyArchetype::PrimaryAssetType(TEXT("EnemyArchetype"));
 const FName UGobulinEnemyArchetype::PresentationBundle(TEXT("Presentation"));
 
@@ -18,10 +20,7 @@ bool UGobulinEnemyArchetype::IsDefinitionValid() const
 		&& TargetAcquisitionRadius >= 0.0f
 		&& FMath::IsFinite(TargetLoseRadius)
 		&& TargetLoseRadius >= TargetAcquisitionRadius
-		&& FMath::IsFinite(AttackReadyDistance)
-		&& AttackReadyDistance >= 0.0f
-		&& FMath::IsFinite(ResumeMoveDistance)
-		&& ResumeMoveDistance >= AttackReadyDistance
+		&& ContactDamage.IsValid()
 		&& FMath::IsFinite(DecisionInterval)
 		&& DecisionInterval >= 0.05f
 		&& FMath::IsFinite(NavigationRetryDelay)
@@ -30,8 +29,7 @@ bool UGobulinEnemyArchetype::IsDefinitionValid() const
 		&& AvoidanceConsiderationRadius >= 1.0f
 		&& FMath::IsFinite(SpawnDuration)
 		&& SpawnDuration >= 0.0f
-		&& FMath::IsFinite(DeathDuration)
-		&& DeathDuration >= 0.0f
+		&& Reaction.IsValid()
 		&& Body.IsValid()
 		&& Presentation.IsValid();
 }
@@ -45,11 +43,28 @@ FGobulinEnemyRuntimeStats UGobulinEnemyArchetype::BuildRuntimeStats(float PowerS
 	Stats.MoveSpeed = FMath::Max(0.0f, MoveSpeed);
 	Stats.TargetAcquisitionRadius = FMath::Max(0.0f, TargetAcquisitionRadius);
 	Stats.TargetLoseRadius = FMath::Max(Stats.TargetAcquisitionRadius, TargetLoseRadius);
-	Stats.AttackReadyDistance = FMath::Max(0.0f, AttackReadyDistance);
-	Stats.ResumeMoveDistance = FMath::Max(Stats.AttackReadyDistance, ResumeMoveDistance);
+	Stats.ContactDamage = ContactDamage;
+	Stats.ContactDamage.BaseDamage = FMath::Max(0.0f, ContactDamage.BaseDamage * SafePowerScale);
+	Stats.ContactDamage.DamageInterval = FMath::Max(0.05f, ContactDamage.DamageInterval);
+	Stats.ContactDamage.ContactEnterTolerance = FMath::Max(0.0f, ContactDamage.ContactEnterTolerance);
+	Stats.ContactDamage.ContactExitTolerance = FMath::Max(
+		Stats.ContactDamage.ContactEnterTolerance,
+		ContactDamage.ContactExitTolerance);
+	if (!Stats.ContactDamage.AttackTag.IsValid())
+	{
+		Stats.ContactDamage.AttackTag = CombatTag_Attack_Melee;
+	}
+	if (!Stats.ContactDamage.DamageType.IsValid())
+	{
+		Stats.ContactDamage.DamageType = CombatTag_Damage_Physical;
+	}
 	Stats.DecisionInterval = FMath::Max(0.05f, DecisionInterval);
 	Stats.NavigationRetryDelay = FMath::Max(0.05f, NavigationRetryDelay);
 	Stats.SpawnDuration = FMath::Max(0.0f, SpawnDuration);
-	Stats.DeathDuration = FMath::Max(0.0f, DeathDuration);
+	Stats.Reaction = Reaction;
+	if (!Stats.Reaction.HeavyAttackTag.IsValid())
+	{
+		Stats.Reaction.HeavyAttackTag = CombatTag_Attack_Melee_Heavy;
+	}
 	return Stats;
 }

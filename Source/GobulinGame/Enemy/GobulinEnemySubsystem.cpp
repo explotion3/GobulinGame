@@ -5,6 +5,7 @@
 #include "Combat/CombatEventSubsystem.h"
 #include "Combat/CombatSubsystem.h"
 #include "Core/CombatTags.h"
+#include "Core/GobulinCollisionChannels.h"
 #include "Enemy/GobulinEnemyActor.h"
 #include "Enemy/GobulinEnemyArchetype.h"
 #include "Engine/AssetManager.h"
@@ -29,6 +30,36 @@ namespace
 		return Left.GetIndex() != Right.GetIndex()
 			? Left.GetIndex() < Right.GetIndex()
 			: Left.GetGeneration() < Right.GetGeneration();
+	}
+
+	bool AreUprightCapsulesWithinTolerance(
+		const FVector& LeftLocation,
+		const FCombatantBodyShape& LeftBody,
+		const FVector& RightLocation,
+		const FCombatantBodyShape& RightBody,
+		float Tolerance)
+	{
+		if (!LeftBody.IsValid()
+			|| !RightBody.IsValid()
+			|| !FMath::IsFinite(Tolerance)
+			|| Tolerance < 0.0f)
+		{
+			return false;
+		}
+
+		const double HorizontalDistanceSquared = FVector::DistSquaredXY(LeftLocation, RightLocation);
+		const double LeftSegmentHalfLength = LeftBody.CapsuleHalfHeight - LeftBody.CapsuleRadius;
+		const double RightSegmentHalfLength = RightBody.CapsuleHalfHeight - RightBody.CapsuleRadius;
+		const double VerticalAxisGap = FMath::Max(
+			0.0,
+			FMath::Abs(static_cast<double>(LeftLocation.Z - RightLocation.Z))
+				- LeftSegmentHalfLength
+				- RightSegmentHalfLength);
+		const double ContactDistance = LeftBody.CapsuleRadius
+			+ RightBody.CapsuleRadius
+			+ static_cast<double>(Tolerance);
+		return HorizontalDistanceSquared + FMath::Square(VerticalAxisGap)
+			<= FMath::Square(ContactDistance);
 	}
 }
 
@@ -95,6 +126,7 @@ void UGobulinEnemySubsystem::Tick(float DeltaTime)
 	const float WorldTime = World->GetTimeSeconds();
 	TArray<FCombatantHandle> SpawnCompletions;
 	TArray<FCombatantHandle> DeathCompletions;
+	TArray<FCombatantHandle> ReactionCompletions;
 	TArray<FCombatantHandle> MissingActors;
 	TArray<FCombatantHandle> BehaviorUpdates;
 
@@ -107,24 +139,38 @@ void UGobulinEnemySubsystem::Tick(float DeltaTime)
 			continue;
 		}
 
-		if (RuntimeData.State.StateEndTime <= 0.0f || WorldTime < RuntimeData.State.StateEndTime)
+		if (RuntimeData.State.CurrentState == EEnemyState::Dying)
 		{
-			if (RuntimeData.IsAlive()
-				&& IsBehaviorState(RuntimeData.State.CurrentState)
-				&& WorldTime >= RuntimeData.NextBehaviorUpdateTime)
+			if (Pair.Value.Actor->IsDeathPresentationComplete()
+				|| (RuntimeData.State.StateEndTime > 0.0f
+					&& WorldTime >= RuntimeData.State.StateEndTime))
 			{
-				BehaviorUpdates.Add(Pair.Key);
+				DeathCompletions.Add(Pair.Key);
 			}
 			continue;
 		}
 
-		if (RuntimeData.State.CurrentState == EEnemyState::Spawning)
+		if (RuntimeData.State.CurrentState == EEnemyState::Spawning
+			&& RuntimeData.State.StateEndTime > 0.0f
+			&& WorldTime >= RuntimeData.State.StateEndTime)
 		{
 			SpawnCompletions.Add(Pair.Key);
 		}
-		else if (RuntimeData.State.CurrentState == EEnemyState::Dying)
+		else if ((RuntimeData.State.CurrentState == EEnemyState::HitReacting
+				|| RuntimeData.State.CurrentState == EEnemyState::Staggered)
+			&& RuntimeData.State.StateEndTime > 0.0f
+			&& WorldTime >= RuntimeData.State.StateEndTime
+			&& (Pair.Value.Actor->IsEnemyGrounded()
+				|| WorldTime >= RuntimeData.State.StateStartTime
+					+ RuntimeData.Stats.Reaction.MaximumAirborneReactionDuration))
 		{
-			DeathCompletions.Add(Pair.Key);
+			ReactionCompletions.Add(Pair.Key);
+		}
+		else if (RuntimeData.IsAlive()
+			&& IsBehaviorState(RuntimeData.State.CurrentState)
+			&& WorldTime >= RuntimeData.NextBehaviorUpdateTime)
+		{
+			BehaviorUpdates.Add(Pair.Key);
 		}
 	}
 
@@ -140,6 +186,20 @@ void UGobulinEnemySubsystem::Tick(float DeltaTime)
 	for (FCombatantHandle Enemy : DeathCompletions)
 	{
 		RetireEnemy(Enemy, EEnemyRetireReason::DeathCompleted);
+	}
+
+	for (FCombatantHandle Enemy : ReactionCompletions)
+	{
+		if (FActorEnemyRecord* Record = ActiveEnemies.Find(Enemy))
+		{
+			Record->RuntimeData.Movement.Status = EEnemyMoveStatus::Idle;
+			Record->RuntimeData.NextBehaviorUpdateTime = WorldTime;
+		}
+		TransitionEnemy(
+			Enemy,
+			EEnemyState::SeekingTarget,
+			0.0f,
+			CombatTag_EnemyStateReason_Recovered);
 	}
 
 	for (FCombatantHandle Enemy : MissingActors)
@@ -349,26 +409,98 @@ FCombatDamageResult UGobulinEnemySubsystem::ResolveEnemyDamage(
 	Result.Result = ECombatDamageResult::Applied;
 	Result.AppliedAmount = AppliedAmount;
 	Result.RemainingHealth = RuntimeData.CurrentHealth;
-	Result.ReactionTag = CombatTag_Reaction_Hit;
 	Result.bKilled = RuntimeData.CurrentHealth <= 0.0f;
+	const float WorldTime = GetWorld()->GetTimeSeconds();
+	const FGobulinEnemyReactionDefinition& Reaction = RuntimeData.Stats.Reaction;
+	const FVector ImpactVelocity = (Request.Impulse * Reaction.KnockbackVelocityScale)
+		.GetClampedToMaxSize(Reaction.MaximumLaunchVelocity);
 
 	if (!Result.bKilled)
 	{
+		LeaveContact(*Record);
+		SetEnemyMoveStatus(*Record, EEnemyMoveStatus::Idle, WorldTime);
+		Record->Actor->ApplyEnemyImpact(ImpactVelocity, false);
+
+		const bool bMeetsDamageThreshold = Reaction.StaggerDamageRatioThreshold > 0.0f
+			&& AppliedAmount / RuntimeData.Stats.MaxHealth >= Reaction.StaggerDamageRatioThreshold;
+		const bool bHeavyAttack = Reaction.HeavyAttackTag.IsValid()
+			&& Request.AttackTag.MatchesTag(Reaction.HeavyAttackTag);
+		const bool bCanEnterStagger = WorldTime >= RuntimeData.Reaction.StaggerImmunityEndTime;
+		if ((bMeetsDamageThreshold || bHeavyAttack) && bCanEnterStagger)
+		{
+			Result.ReactionTag = CombatTag_Reaction_Stagger;
+			if (TransitionEnemy(
+				Enemy,
+				EEnemyState::Staggered,
+				Reaction.StaggerDuration,
+				CombatTag_EnemyStateReason_Damaged))
+			{
+				RuntimeData.Reaction.StaggerImmunityEndTime = WorldTime
+					+ Reaction.StaggerDuration
+					+ Reaction.StaggerImmunityDuration;
+			}
+		}
+		else
+		{
+			Result.ReactionTag = ImpactVelocity.IsNearlyZero()
+				? CombatTag_Reaction_Hit
+				: CombatTag_Reaction_Knockback;
+			if (RuntimeData.State.CurrentState != EEnemyState::Staggered)
+			{
+				TransitionEnemy(
+					Enemy,
+					EEnemyState::HitReacting,
+					Reaction.LightInterruptDuration,
+					CombatTag_EnemyStateReason_Damaged);
+			}
+		}
 		return Result;
 	}
 
-	if (UCombatantRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UCombatantRegistrySubsystem>())
+	UCombatantRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UCombatantRegistrySubsystem>();
+	FVector LethalLaunchVelocity = ImpactVelocity;
+	FVector HorizontalVelocity(LethalLaunchVelocity.X, LethalLaunchVelocity.Y, 0.0f);
+	if (HorizontalVelocity.IsNearlyZero() && Registry)
+	{
+		if (const AActor* SourceActor = Registry->ResolveActor(Request.Source))
+		{
+			HorizontalVelocity = (Record->Actor->GetActorLocation() - SourceActor->GetActorLocation()).GetSafeNormal2D()
+				* Reaction.LethalFallbackHorizontalVelocity;
+		}
+	}
+	if (HorizontalVelocity.IsNearlyZero())
+	{
+		HorizontalVelocity = -Request.HitNormal.GetSafeNormal2D()
+			* Reaction.LethalFallbackHorizontalVelocity;
+	}
+	HorizontalVelocity *= Reaction.LethalHorizontalVelocityScale;
+	const float LethalVerticalVelocity = FMath::Min(
+		FMath::Max(LethalLaunchVelocity.Z, Reaction.LethalMinimumVerticalVelocity),
+		Reaction.MaximumLaunchVelocity);
+	const float MaximumHorizontalVelocity = FMath::Sqrt(FMath::Max(
+		0.0f,
+		FMath::Square(Reaction.MaximumLaunchVelocity)
+			- FMath::Square(LethalVerticalVelocity)));
+	HorizontalVelocity = HorizontalVelocity.GetClampedToMaxSize(MaximumHorizontalVelocity);
+	LethalLaunchVelocity = FVector(
+		HorizontalVelocity.X,
+		HorizontalVelocity.Y,
+		LethalVerticalVelocity);
+	Result.ReactionTag = CombatTag_Reaction_Knockback;
+
+	if (Registry)
 	{
 		Registry->SetCombatantActive(Enemy, false);
 	}
-	Record->RuntimeData.Target.Clear(GetWorld()->GetTimeSeconds());
-	Record->RuntimeData.Movement.Status = EEnemyMoveStatus::Idle;
-	Record->Actor->SetEnemyCollisionEnabled(false);
+	Record->RuntimeData.Target.Clear(WorldTime);
+	LeaveContact(*Record);
+	SetEnemyMoveStatus(*Record, EEnemyMoveStatus::Idle, WorldTime);
 	TransitionEnemy(
 		Enemy,
 		EEnemyState::Dying,
-		RuntimeData.Stats.DeathDuration,
+		Reaction.DeathMaximumDuration,
 		CombatTag_EnemyStateReason_Killed);
+	Record->Actor->BeginDeathPhysics(LethalLaunchVelocity);
 
 	if (UCombatEventSubsystem* Events = GetWorld()->GetSubsystem<UCombatEventSubsystem>())
 	{
@@ -439,11 +571,12 @@ void UGobulinEnemySubsystem::NotifyEnemyMoveCompleted(
 
 	const float WorldTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
 	SetEnemyMoveStatus(*Record, Status, WorldTime);
-	if (Status == EEnemyMoveStatus::Reached)
+	if (Status == EEnemyMoveStatus::Reached || Status == EEnemyMoveStatus::Blocked)
 	{
-		EnterAttackReady(Enemy, *Record, WorldTime);
+		// Reached 仍需用双方逻辑胶囊确认接触；Blocked 也可能只是撞到了目标胶囊。
+		Record->RuntimeData.NextBehaviorUpdateTime = WorldTime;
 	}
-	else if (Status == EEnemyMoveStatus::Blocked || Status == EEnemyMoveStatus::Failed)
+	else if (Status == EEnemyMoveStatus::Failed)
 	{
 		ClearEnemyTarget(
 			Enemy,
@@ -540,7 +673,10 @@ void UGobulinEnemySubsystem::CompleteSpawn(
 		return;
 	}
 
-	const FCombatantHandle Enemy = Registry->RegisterActor(Actor, Request.TeamId);
+	FCombatantBodyShape BodyShape;
+	BodyShape.CapsuleRadius = Archetype.Body.CapsuleRadius * RadialScale;
+	BodyShape.CapsuleHalfHeight = Archetype.Body.CapsuleHalfHeight * VerticalScale;
+	const FCombatantHandle Enemy = Registry->RegisterActor(Actor, Request.TeamId, BodyShape);
 	if (!Enemy.IsSet())
 	{
 		Actor->Destroy();
@@ -559,6 +695,7 @@ void UGobulinEnemySubsystem::CompleteSpawn(
 	Record.RuntimeData.EnemyLevel = Request.EnemyLevel;
 	Record.RuntimeData.PowerScale = Request.PowerScale;
 	Record.RuntimeData.Stats = Archetype.BuildRuntimeStats(Request.PowerScale);
+	Record.RuntimeData.BodyShape = BodyShape;
 	Record.RuntimeData.CurrentHealth = Record.RuntimeData.Stats.MaxHealth;
 	const float BehaviorStagger = Record.RuntimeData.Stats.DecisionInterval
 		* (static_cast<float>(Enemy.GetIndex() % 16) / 16.0f);
@@ -595,8 +732,11 @@ bool UGobulinEnemySubsystem::TransitionEnemy(
 		return false;
 	}
 
-	const bool bTimedLifecycleState = NewState == EEnemyState::Spawning || NewState == EEnemyState::Dying;
-	const float EffectiveDuration = bTimedLifecycleState ? FMath::Max(Duration, KINDA_SMALL_NUMBER) : 0.0f;
+	const bool bTimedState = NewState == EEnemyState::Spawning
+		|| NewState == EEnemyState::HitReacting
+		|| NewState == EEnemyState::Staggered
+		|| NewState == EEnemyState::Dying;
+	const float EffectiveDuration = bTimedState ? FMath::Max(Duration, KINDA_SMALL_NUMBER) : 0.0f;
 	FEnemyStateTransition Transition;
 	if (!Record->RuntimeData.State.TryTransition(
 		NewState,
@@ -655,6 +795,7 @@ void UGobulinEnemySubsystem::UpdateEnemyBehavior(
 		}
 
 		if (!TargetSnapshot
+			|| !TargetSnapshot->IsValid()
 			|| !TargetSnapshot->bActive
 			|| TargetSnapshot->TeamId == RuntimeData.TeamId)
 		{
@@ -692,20 +833,50 @@ void UGobulinEnemySubsystem::UpdateEnemyBehavior(
 		bAcquiredThisUpdate = true;
 	}
 
-	const float HorizontalDistance = FVector::Dist2D(
+	const bool bMaintainingCurrentContact = RuntimeData.ContactDamage.bInContact
+		&& RuntimeData.ContactDamage.ContactTarget == TargetSnapshot->Handle;
+	const float ContactTolerance = bMaintainingCurrentContact
+		? RuntimeData.Stats.ContactDamage.ContactExitTolerance
+		: RuntimeData.Stats.ContactDamage.ContactEnterTolerance;
+	const bool bWithinContactDistance = AreUprightCapsulesWithinTolerance(
 		Actor->GetActorLocation(),
-		TargetSnapshot->Location);
-	const float ReadyThreshold = RuntimeData.State.CurrentState == EEnemyState::ReadyToAttack
-		? RuntimeData.Stats.ResumeMoveDistance
-		: RuntimeData.Stats.AttackReadyDistance;
-	if (HorizontalDistance <= ReadyThreshold)
+		RuntimeData.BodyShape,
+		TargetSnapshot->Location,
+		TargetSnapshot->BodyShape,
+		ContactTolerance);
+	const bool bHasContact = bWithinContactDistance
+		&& HasClearContactPath(*Actor, TargetSnapshot->Handle);
+	if (bHasContact)
 	{
+		RuntimeData.ContactDamage.Enter(TargetSnapshot->Handle);
 		EnterAttackReady(Enemy, *Record, WorldTime);
+		TryApplyContactDamage(Enemy, *Record, *TargetSnapshot, WorldTime);
+		return;
+	}
+
+	LeaveContact(*Record);
+	if (bWithinContactDistance)
+	{
+		// 几何距离足够近但 CombatTrace 被世界阻挡，不能隔墙造成接触伤害。
+		ClearEnemyTarget(
+			Enemy,
+			EEnemyTargetChangeReason::NavigationFailed,
+			CombatTag_EnemyStateReason_NavigationFailed,
+			WorldTime);
 		return;
 	}
 
 	if (RuntimeData.Movement.Status == EEnemyMoveStatus::Moving)
 	{
+		return;
+	}
+	if (RuntimeData.Movement.Status == EEnemyMoveStatus::Blocked)
+	{
+		ClearEnemyTarget(
+			Enemy,
+			EEnemyTargetChangeReason::NavigationFailed,
+			CombatTag_EnemyStateReason_NavigationFailed,
+			WorldTime);
 		return;
 	}
 
@@ -724,7 +895,9 @@ void UGobulinEnemySubsystem::UpdateEnemyBehavior(
 	Intent.Target = RuntimeData.Target.Handle;
 	Intent.Destination = TargetSnapshot->Location;
 	Intent.DesiredSpeed = RuntimeData.Stats.MoveSpeed;
-	Intent.AcceptanceRadius = RuntimeData.Stats.AttackReadyDistance;
+	Intent.AcceptanceRadius = RuntimeData.BodyShape.CapsuleRadius
+		+ TargetSnapshot->BodyShape.CapsuleRadius
+		+ RuntimeData.Stats.ContactDamage.ContactEnterTolerance;
 	Intent.RequestedTime = WorldTime;
 	Intent.IntentSequence = ++RuntimeData.Movement.LastIntentSequence;
 	RuntimeData.Movement.Intent = Intent;
@@ -746,7 +919,8 @@ void UGobulinEnemySubsystem::UpdateEnemyBehavior(
 	}
 	else if (SubmissionStatus == EEnemyMoveStatus::Reached)
 	{
-		EnterAttackReady(Enemy, *Record, WorldTime);
+		// MoveTo 的中心距离测试不能替代逻辑胶囊和遮挡验证，下一次行为更新再确认接触。
+		RuntimeData.NextBehaviorUpdateTime = WorldTime;
 	}
 	else
 	{
@@ -831,11 +1005,11 @@ void UGobulinEnemySubsystem::ClearEnemyTarget(
 	}
 
 	Record->RuntimeData.Target.Clear(WorldTime);
-	if (Reason != EEnemyTargetChangeReason::NavigationFailed)
-	{
-		Record->RuntimeData.Movement.Status = EEnemyMoveStatus::Idle;
-		Record->RuntimeData.Movement.StatusChangeTime = WorldTime;
-	}
+	LeaveContact(*Record);
+	// Blocked/Failed 事实已经在移动状态事件中发布；清除目标后执行器状态必须复位，
+	// 否则导航重试获得新目标时会继续沿用上一目标的失败状态。
+	Record->RuntimeData.Movement.Status = EEnemyMoveStatus::Idle;
+	Record->RuntimeData.Movement.StatusChangeTime = WorldTime;
 
 	PublishTargetChanged(*Record, PreviousTarget, LastKnownLocation, Reason);
 	if (Record->RuntimeData.State.CurrentState == EEnemyState::Moving
@@ -886,6 +1060,101 @@ void UGobulinEnemySubsystem::EnterAttackReady(
 			0.0f,
 			CombatTag_EnemyStateReason_AttackReady);
 	}
+}
+
+bool UGobulinEnemySubsystem::HasClearContactPath(
+	const AGobulinEnemyActor& EnemyActor,
+	FCombatantHandle Target) const
+{
+	const UWorld* World = GetWorld();
+	const UCombatantRegistrySubsystem* Registry = World
+		? World->GetSubsystem<UCombatantRegistrySubsystem>()
+		: nullptr;
+	const AActor* TargetActor = Registry ? Registry->ResolveActor(Target) : nullptr;
+	if (!World || !TargetActor)
+	{
+		return false;
+	}
+
+	const FVector Start = EnemyActor.GetActorLocation();
+	const FVector End = TargetActor->GetActorLocation();
+	if (Start.Equals(End, KINDA_SMALL_NUMBER))
+	{
+		return true;
+	}
+
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(GobulinEnemyContact), false);
+	QueryParams.AddIgnoredActor(&EnemyActor);
+	TArray<FHitResult> Hits;
+	World->LineTraceMultiByChannel(
+		Hits,
+		Start,
+		End,
+		GobulinCollision::CombatTrace,
+		QueryParams);
+	for (const FHitResult& Hit : Hits)
+	{
+		if (Hit.GetActor() == TargetActor)
+		{
+			return true;
+		}
+		if (Hit.bBlockingHit)
+		{
+			return false;
+		}
+	}
+	return false;
+}
+
+void UGobulinEnemySubsystem::LeaveContact(FActorEnemyRecord& Record)
+{
+	Record.RuntimeData.ContactDamage.Leave();
+}
+
+void UGobulinEnemySubsystem::TryApplyContactDamage(
+	FCombatantHandle Enemy,
+	FActorEnemyRecord& Record,
+	const FCombatantSnapshot& Target,
+	float WorldTime)
+{
+	FGobulinEnemyRuntimeData& RuntimeData = Record.RuntimeData;
+	const FGobulinEnemyContactDamageDefinition& Definition = RuntimeData.Stats.ContactDamage;
+	if (!Definition.bEnabled
+		|| !RuntimeData.ContactDamage.bInContact
+		|| RuntimeData.ContactDamage.ContactTarget != Target.Handle
+		|| WorldTime < RuntimeData.ContactDamage.NextDamageTime)
+	{
+		return;
+	}
+
+	UCombatSubsystem* Combat = GetWorld()
+		? GetWorld()->GetSubsystem<UCombatSubsystem>()
+		: nullptr;
+	if (!Combat)
+	{
+		return;
+	}
+
+	FVector ContactDirection = Target.Location - Record.Actor->GetActorLocation();
+	ContactDirection.Z = 0.0f;
+	ContactDirection = ContactDirection.GetSafeNormal();
+	if (ContactDirection.IsNearlyZero())
+	{
+		ContactDirection = FVector::ForwardVector;
+	}
+
+	FCombatDamageRequest Request;
+	Request.Source = Enemy;
+	Request.Target = Target.Handle;
+	Request.BaseAmount = Definition.BaseDamage;
+	Request.AttackTag = Definition.AttackTag;
+	Request.DamageType = Definition.DamageType;
+	Request.HitLocation = Target.Location - ContactDirection * Target.BodyShape.CapsuleRadius;
+	Request.HitNormal = -ContactDirection;
+	Combat->SubmitDamage(MoveTemp(Request));
+
+	RuntimeData.ContactDamage.NextDamageTime = WorldTime + Definition.DamageInterval;
+	++RuntimeData.ContactDamage.DamageSequence;
 }
 
 void UGobulinEnemySubsystem::PublishTargetChanged(

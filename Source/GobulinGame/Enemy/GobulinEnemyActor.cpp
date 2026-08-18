@@ -68,6 +68,19 @@ void AGobulinEnemyActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
+void AGobulinEnemyActor::Landed(const FHitResult& Hit)
+{
+	Super::Landed(Hit);
+
+	if (PresentationComponent
+		&& PresentationComponent->GetCurrentVisualState() == EGobulinEnemyVisualState::Death)
+	{
+		GetCharacterMovement()->StopMovementImmediately();
+		GetCharacterMovement()->DisableMovement();
+		PresentationComponent->NotifyDeathLanded();
+	}
+}
+
 FCombatDamageResult AGobulinEnemyActor::ResolveCombatDamage_Implementation(const FCombatDamageRequest& Request)
 {
 	if (UGobulinEnemySubsystem* EnemySubsystem = GetWorld()
@@ -98,6 +111,7 @@ void AGobulinEnemyActor::InitializeEnemy(FCombatantHandle InHandle, const UGobul
 	GetCharacterMovement()->MaxWalkSpeed = Archetype.MoveSpeed;
 	GetCharacterMovement()->SetAvoidanceEnabled(Archetype.bUseRVOAvoidance);
 	GetCharacterMovement()->AvoidanceConsiderationRadius = Archetype.AvoidanceConsiderationRadius;
+	ReactionDefinition = Archetype.Reaction;
 	FeetAnchor->SetRelativeLocation(FVector(0.0f, 0.0f, -Archetype.Body.CapsuleHalfHeight));
 	PresentationComponent->ApplyDefinition(Archetype.Presentation);
 	ApplyEnemyState(EEnemyState::Spawning);
@@ -111,6 +125,12 @@ void AGobulinEnemyActor::ApplyEnemyState(EEnemyState NewState)
 	}
 
 	PresentationComponent->ApplyEnemyState(NewState);
+	PresentationComponent->SetLocomotionSuspended(
+		NewState == EEnemyState::HitReacting || NewState == EEnemyState::Staggered);
+	if (NewState == EEnemyState::Dying)
+	{
+		PresentationComponent->BeginDeathEffects(ReactionDefinition);
+	}
 }
 
 EEnemyMoveStatus AGobulinEnemyActor::RequestMoveToTarget(
@@ -139,14 +159,52 @@ void AGobulinEnemyActor::StopEnemyMovement()
 	GetCharacterMovement()->StopMovementImmediately();
 }
 
-void AGobulinEnemyActor::SetEnemyCollisionEnabled(bool bEnabled)
+void AGobulinEnemyActor::ApplyEnemyImpact(const FVector& LaunchVelocity, bool bLethal)
 {
-	GetCapsuleComponent()->SetCollisionEnabled(bEnabled ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
-	if (!bEnabled)
+	StopEnemyMovement();
+	if (PresentationComponent)
 	{
-		StopEnemyMovement();
-		GetCharacterMovement()->DisableMovement();
+		PresentationComponent->BeginHitFlash(bLethal, ReactionDefinition);
 	}
+
+	if (!LaunchVelocity.IsNearlyZero())
+	{
+		LaunchCharacter(LaunchVelocity, true, true);
+	}
+}
+
+void AGobulinEnemyActor::BeginDeathPhysics(const FVector& LaunchVelocity)
+{
+	UCapsuleComponent* CollisionCapsule = GetCapsuleComponent();
+	CollisionCapsule->SetCapsuleSize(
+		CollisionCapsule->GetUnscaledCapsuleRadius() * ReactionDefinition.CorpseCapsuleRadiusScale,
+		CollisionCapsule->GetUnscaledCapsuleHalfHeight(),
+		true);
+	CollisionCapsule->SetCollisionObjectType(GobulinCollision::EnemyCorpse);
+	CollisionCapsule->SetCollisionResponseToAllChannels(ECR_Ignore);
+	CollisionCapsule->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+	CollisionCapsule->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
+	CollisionCapsule->SetCollisionResponseToChannel(GobulinCollision::EnemyCorpse, ECR_Block);
+	CollisionCapsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	CollisionCapsule->CanCharacterStepUpOn = ECanBeCharacterBase::ECB_No;
+	CollisionCapsule->SetWalkableSlopeOverride(
+		FWalkableSlopeOverride(WalkableSlope_Unwalkable, 0.0f));
+
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	Movement->SetAvoidanceEnabled(false);
+	Movement->GravityScale = ReactionDefinition.DeathGravityScale;
+	ApplyEnemyImpact(LaunchVelocity, true);
+}
+
+bool AGobulinEnemyActor::IsEnemyGrounded() const
+{
+	const UCharacterMovementComponent* Movement = GetCharacterMovement();
+	return Movement && !Movement->IsFalling();
+}
+
+bool AGobulinEnemyActor::IsDeathPresentationComplete() const
+{
+	return PresentationComponent && PresentationComponent->IsDeathPresentationComplete();
 }
 
 void AGobulinEnemyActor::ReleaseEnemyHandle()

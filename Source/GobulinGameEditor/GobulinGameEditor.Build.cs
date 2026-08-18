@@ -14,6 +14,7 @@ public class GobulinGameEditor : ModuleRules
 			"UnrealEd",
 			"AssetTools",
 			"EnhancedInput",
+			"GameplayTags",
 			"GobulinGame",
 			"Paper2D",
 			"Slate",

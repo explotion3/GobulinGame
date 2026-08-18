@@ -14,8 +14,10 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/PlayerController.h"
 #include "InputActionValue.h"
 #include "Player/GobulinCameraFeedbackComponent.h"
+#include "UI/GobulinPlayerStatusWidget.h"
 #include "UObject/ConstructorHelpers.h"
 
 AGobulinPlayerCharacter::AGobulinPlayerCharacter()
@@ -85,6 +87,8 @@ AGobulinPlayerCharacter::AGobulinPlayerCharacter()
 	SwordCombat = CreateDefaultSubobject<UGobulinSwordCombatComponent>(TEXT("SwordCombat"));
 	SwordFeedback = CreateDefaultSubobject<UGobulinSwordFeedbackComponent>(TEXT("SwordFeedback"));
 	SwordFeedback->SetSwordCombat(SwordCombat);
+
+	PlayerStatusWidgetClass = UGobulinPlayerStatusWidget::StaticClass();
 }
 
 void AGobulinPlayerCharacter::BeginPlay()
@@ -93,7 +97,10 @@ void AGobulinPlayerCharacter::BeginPlay()
 
 	if (UCombatantRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UCombatantRegistrySubsystem>())
 	{
-		CombatantHandle = Registry->RegisterActor(this, CombatTeamId);
+		FCombatantBodyShape BodyShape;
+		BodyShape.CapsuleRadius = GetCapsuleComponent()->GetScaledCapsuleRadius();
+		BodyShape.CapsuleHalfHeight = GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+		CombatantHandle = Registry->RegisterActor(this, CombatTeamId, BodyShape);
 	}
 
 	if (Attributes)
@@ -122,6 +129,9 @@ void AGobulinPlayerCharacter::BeginPlay()
 		SwordFeedback->SetSwordCombat(SwordCombat);
 	}
 
+	CreatePlayerStatusWidget();
+	RefreshPlayerStatusWidget();
+
 	if (!IsLocallyControlled())
 	{
 		if (FirstPersonWeaponView)
@@ -137,6 +147,13 @@ void AGobulinPlayerCharacter::BeginPlay()
 
 void AGobulinPlayerCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (PlayerStatusWidget)
+	{
+		PlayerStatusWidget->OnRestartRequested.RemoveDynamic(this, &AGobulinPlayerCharacter::HandleRestartRequested);
+		PlayerStatusWidget->RemoveFromParent();
+		PlayerStatusWidget = nullptr;
+	}
+
 	if (UCombatantRegistrySubsystem* Registry = GetWorld() ? GetWorld()->GetSubsystem<UCombatantRegistrySubsystem>() : nullptr)
 	{
 		Registry->UnregisterHandle(CombatantHandle);
@@ -174,6 +191,7 @@ void AGobulinPlayerCharacter::OnConstruction(const FTransform& Transform)
 void AGobulinPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
+	CreatePlayerStatusWidget();
 
 	UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent);
 	if (!EnhancedInputComponent)
@@ -381,9 +399,16 @@ void AGobulinPlayerCharacter::ApplyMovementSettings()
 
 void AGobulinPlayerCharacter::OnAttributeChanged(FGameplayTag AttributeTag, float NewValue)
 {
+	(void)NewValue;
+
 	if (AttributeTag.MatchesTagExact(BattleTag_Movement_Speed))
 	{
 		ApplyMovementSettings();
+	}
+	else if (AttributeTag.MatchesTagExact(BattleTag_Health_Current)
+		|| AttributeTag.MatchesTagExact(BattleTag_Health_Max))
+	{
+		RefreshPlayerStatusWidget();
 	}
 }
 
@@ -444,15 +469,22 @@ FCombatDamageResult AGobulinPlayerCharacter::ResolveCombatDamage_Implementation(
 	Result.ReactionTag = CombatTag_Reaction_Hit;
 	Result.bKilled = NewHealth <= 0.0f;
 
+	OnPlayerDamaged.Broadcast(Request, Result);
+	RefreshPlayerStatusWidget();
+	if (PlayerStatusWidget)
+	{
+		PlayerStatusWidget->PlayDamageFeedback(Result.AppliedAmount);
+	}
+
 	if (Result.bKilled)
 	{
-		Die();
+		Die(Result);
 	}
 
 	return Result;
 }
 
-void AGobulinPlayerCharacter::Die()
+void AGobulinPlayerCharacter::Die(const FCombatDamageResult& KillingResult)
 {
 	if (bDead)
 	{
@@ -478,4 +510,74 @@ void AGobulinPlayerCharacter::Die()
 	GetCharacterMovement()->StopMovementImmediately();
 	GetCharacterMovement()->DisableMovement();
 	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	RefreshPlayerStatusWidget();
+	if (PlayerStatusWidget)
+	{
+		PlayerStatusWidget->ShowDeath();
+	}
+
+	if (APlayerController* PlayerController = Cast<APlayerController>(Controller); PlayerController && PlayerController->IsLocalController())
+	{
+		FInputModeUIOnly InputMode;
+		if (PlayerStatusWidget)
+		{
+			InputMode.SetWidgetToFocus(PlayerStatusWidget->TakeWidget());
+		}
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PlayerController->SetInputMode(InputMode);
+		PlayerController->bShowMouseCursor = true;
+	}
+
+	OnPlayerDied.Broadcast(KillingResult);
+}
+
+void AGobulinPlayerCharacter::CreatePlayerStatusWidget()
+{
+	if (PlayerStatusWidget || !IsLocallyControlled() || !PlayerStatusWidgetClass)
+	{
+		return;
+	}
+
+	APlayerController* PlayerController = Cast<APlayerController>(Controller);
+	if (!PlayerController || !PlayerController->IsLocalController())
+	{
+		return;
+	}
+
+	PlayerStatusWidget = CreateWidget<UGobulinPlayerStatusWidget>(PlayerController, PlayerStatusWidgetClass);
+	if (!PlayerStatusWidget)
+	{
+		return;
+	}
+
+	PlayerStatusWidget->OnRestartRequested.AddUniqueDynamic(this, &AGobulinPlayerCharacter::HandleRestartRequested);
+	PlayerStatusWidget->AddToPlayerScreen(50);
+	PlayerStatusWidget->HideDeath();
+	RefreshPlayerStatusWidget();
+}
+
+void AGobulinPlayerCharacter::RefreshPlayerStatusWidget()
+{
+	if (!PlayerStatusWidget || !Attributes)
+	{
+		return;
+	}
+
+	PlayerStatusWidget->SetHealth(
+		Attributes->GetAttributeValue(BattleTag_Health_Current),
+		Attributes->GetAttributeValue(BattleTag_Health_Max));
+}
+
+void AGobulinPlayerCharacter::HandleRestartRequested()
+{
+	APlayerController* PlayerController = Cast<APlayerController>(Controller);
+	if (!bDead || !PlayerController || !PlayerController->IsLocalController())
+	{
+		return;
+	}
+
+	PlayerController->bShowMouseCursor = false;
+	PlayerController->SetInputMode(FInputModeGameOnly());
+	PlayerController->RestartLevel();
 }

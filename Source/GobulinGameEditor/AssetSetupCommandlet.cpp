@@ -262,6 +262,8 @@ int32 UAssetSetupCommandlet::Main(const FString& Params)
 		SwordDefinition->SwingSoundNormalizedTime = 0.20f;
 		SwordDefinition->HitCameraShakeScale = 1.0f;
 		SwordDefinition->TipTraceRadius = 6.0f;
+		SwordDefinition->HitKnockbackSpeed = 220.0f;
+		SwordDefinition->HitLaunchSpeed = 90.0f;
 		SwordDefinition->DamageSourceId = TEXT("Sword");
 		SwordDefinition->MarkPackageDirty();
 		CreatedAssets.Add(SwordDefinition);

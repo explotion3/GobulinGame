@@ -92,7 +92,7 @@ struct GOBULINGAME_API FGobulinEnemyFlipbookSet
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy|Presentation")
 	FGobulinEnemyDirectionalFlipbookSet Run;
 
-	/** 死亡时单次播放。 */
+	/** 死亡状态使用的 Flipbook；是否循环由 Presentation.bLoopDeathFlipbook 决定。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy|Presentation")
 	TSoftObjectPtr<UPaperFlipbook> Death;
 
@@ -122,6 +122,14 @@ struct GOBULINGAME_API FGobulinEnemyPaperPresentationDefinition
 	/** 为空时使用各 PaperFlipbook 自带的默认材质。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy|Presentation")
 	TSoftObjectPtr<UMaterialInterface> MaterialOverride;
+
+	/** 死亡阶段可切换为支持平滑透明度的材质；为空时继续使用 Material Override。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy|Presentation")
+	TSoftObjectPtr<UMaterialInterface> DeathMaterialOverride;
+
+	/** 死亡期间是否循环播放 Death Flipbook。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy|Presentation")
+	bool bLoopDeathFlipbook = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy|Presentation")
 	FLinearColor SpriteColor = FLinearColor::White;

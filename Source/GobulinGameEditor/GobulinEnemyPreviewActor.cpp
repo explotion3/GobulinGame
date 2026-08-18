@@ -137,8 +137,12 @@ void AGobulinEnemyPreviewActor::BakeToArchetype()
 	else
 	{
 		TargetArchetype->Presentation.Flipbooks.Death = CurrentFlipbook;
+		TargetArchetype->Presentation.DeathMaterialOverride = CurrentMaterial;
 	}
-	TargetArchetype->Presentation.MaterialOverride = CurrentMaterial;
+	if (PreviewAnimation != EGobulinEnemyPreviewAnimation::Death)
+	{
+		TargetArchetype->Presentation.MaterialOverride = CurrentMaterial;
+	}
 	TargetArchetype->Presentation.SpriteColor = PresentationComponent->GetSpriteColor();
 	TargetArchetype->Presentation.TranslucencySortPriority = PresentationComponent->TranslucencySortPriority;
 	TargetArchetype->Presentation.bCastShadow = PresentationComponent->CastShadow;
@@ -209,6 +213,7 @@ void AGobulinEnemyPreviewActor::LoadReferencedAssetsSynchronously()
 	LoadDirectionalSet(Flipbooks.Run);
 	Flipbooks.Death.LoadSynchronous();
 	TargetArchetype->Presentation.MaterialOverride.LoadSynchronous();
+	TargetArchetype->Presentation.DeathMaterialOverride.LoadSynchronous();
 }
 
 bool AGobulinEnemyPreviewActor::ValidateBake(FText& OutError) const

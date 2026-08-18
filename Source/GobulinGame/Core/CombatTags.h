@@ -3,6 +3,7 @@
 #include "NativeGameplayTags.h"
 
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(CombatTag_Attack_Melee);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(CombatTag_Attack_Melee_Heavy);
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(CombatTag_Attack_Projectile);
 
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(CombatTag_Damage_Physical);

@@ -19,11 +19,15 @@ class GOBULINGAME_API UCombatantRegistrySubsystem : public UWorldSubsystem
 	GENERATED_BODY()
 
 public:
-	FCombatantHandle RegisterActor(AActor* Actor, uint8 TeamId = 0);
+	FCombatantHandle RegisterActor(
+		AActor* Actor,
+		uint8 TeamId,
+		const FCombatantBodyShape& BodyShape);
 	bool UnregisterActor(const AActor* Actor);
 	bool UnregisterHandle(FCombatantHandle Handle);
 	bool SetCombatantActive(FCombatantHandle Handle, bool bActive);
 	bool SetCombatantTeam(FCombatantHandle Handle, uint8 TeamId);
+	bool SetCombatantBodyShape(FCombatantHandle Handle, const FCombatantBodyShape& BodyShape);
 
 	FCombatantHandle FindHandleForActor(const AActor* Actor) const;
 	AActor* ResolveActor(FCombatantHandle Handle) const;
@@ -37,6 +41,7 @@ private:
 	struct FRegistrySlot
 	{
 		TWeakObjectPtr<AActor> Actor;
+		FCombatantBodyShape BodyShape;
 		int32 Generation = 0;
 		uint8 TeamId = 0;
 		bool bOccupied = false;

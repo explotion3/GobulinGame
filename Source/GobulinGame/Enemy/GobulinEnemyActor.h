@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Combat/CombatantEndpoint.h"
 #include "Enemy/EnemyNavigationTypes.h"
+#include "Enemy/EnemyReactionTypes.h"
 #include "Enemy/EnemyStateTypes.h"
 #include "GameFramework/Character.h"
 #include "UObject/PrimaryAssetId.h"
@@ -23,6 +24,7 @@ public:
 	AGobulinEnemyActor();
 
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void Landed(const FHitResult& Hit) override;
 	virtual FCombatDamageResult ResolveCombatDamage_Implementation(const FCombatDamageRequest& Request) override;
 
 	UFUNCTION(BlueprintPure, Category = "Enemy")
@@ -44,7 +46,10 @@ public:
 	void ApplyEnemyState(EEnemyState NewState);
 	EEnemyMoveStatus RequestMoveToTarget(AActor* TargetActor, const FEnemyMoveIntent& Intent);
 	void StopEnemyMovement();
-	void SetEnemyCollisionEnabled(bool bEnabled);
+	void ApplyEnemyImpact(const FVector& LaunchVelocity, bool bLethal);
+	void BeginDeathPhysics(const FVector& LaunchVelocity);
+	bool IsEnemyGrounded() const;
+	bool IsDeathPresentationComplete() const;
 	void ReleaseEnemyHandle();
 
 private:
@@ -59,5 +64,8 @@ private:
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Enemy", meta = (AllowPrivateAccess = "true"))
 	FPrimaryAssetId ArchetypeId;
+
+	UPROPERTY(Transient)
+	FGobulinEnemyReactionDefinition ReactionDefinition;
 
 };

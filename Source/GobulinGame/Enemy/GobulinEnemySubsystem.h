@@ -100,6 +100,15 @@ private:
 		EEnemyMoveStatus NewStatus,
 		float WorldTime);
 	void EnterAttackReady(FCombatantHandle Enemy, FActorEnemyRecord& Record, float WorldTime);
+	bool HasClearContactPath(
+		const AGobulinEnemyActor& EnemyActor,
+		FCombatantHandle Target) const;
+	void LeaveContact(FActorEnemyRecord& Record);
+	void TryApplyContactDamage(
+		FCombatantHandle Enemy,
+		FActorEnemyRecord& Record,
+		const FCombatantSnapshot& Target,
+		float WorldTime);
 	void PublishTargetChanged(
 		FActorEnemyRecord& Record,
 		FCombatantHandle PreviousTarget,

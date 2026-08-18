@@ -15,6 +15,7 @@ enum class EEnemyState : uint8
 	AttackWindup,
 	AttackActive,
 	AttackRecovery,
+	HitReacting,
 	Staggered,
 	Dying
 };

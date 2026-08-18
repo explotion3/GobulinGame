@@ -2,7 +2,10 @@
 
 #include "CoreMinimal.h"
 #include "Combat/CombatantHandle.h"
+#include "Combat/CombatantSnapshot.h"
+#include "Enemy/EnemyContactDamageTypes.h"
 #include "Enemy/EnemyNavigationTypes.h"
+#include "Enemy/EnemyReactionTypes.h"
 #include "Enemy/EnemyStateTypes.h"
 #include "UObject/PrimaryAssetId.h"
 #include "GobulinEnemyRuntimeData.generated.h"
@@ -29,10 +32,7 @@ struct GOBULINGAME_API FGobulinEnemyRuntimeStats
 	float TargetLoseRadius = 0.0f;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
-	float AttackReadyDistance = 0.0f;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
-	float ResumeMoveDistance = 0.0f;
+	FGobulinEnemyContactDamageDefinition ContactDamage;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
 	float DecisionInterval = 0.25f;
@@ -44,7 +44,7 @@ struct GOBULINGAME_API FGobulinEnemyRuntimeStats
 	float SpawnDuration = 0.0f;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
-	float DeathDuration = 0.0f;
+	FGobulinEnemyReactionDefinition Reaction;
 };
 
 /** Backend-neutral mutable data for one enemy instance. Contains no Actor or Mass handle. */
@@ -77,6 +77,10 @@ struct GOBULINGAME_API FGobulinEnemyRuntimeData
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
 	FGobulinEnemyRuntimeStats Stats;
 
+	/** 本实例缩放后的逻辑胶囊；接触判定与注册快照使用同一数值。 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	FCombatantBodyShape BodyShape;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
 	float CurrentHealth = 1.0f;
 
@@ -85,6 +89,12 @@ struct GOBULINGAME_API FGobulinEnemyRuntimeData
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
 	FEnemyMovementData Movement;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	FEnemyContactDamageData ContactDamage;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	FGobulinEnemyReactionData Reaction;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
 	float NextBehaviorUpdateTime = 0.0f;

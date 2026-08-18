@@ -2,6 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "Enemy/EnemyContactDamageTypes.h"
+#include "Enemy/EnemyReactionTypes.h"
 #include "Enemy/GobulinEnemyPresentationTypes.h"
 #include "Enemy/GobulinEnemyRuntimeData.h"
 #include "GobulinEnemyArchetype.generated.h"
@@ -37,13 +39,9 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Targeting", meta = (ClampMin = "0.0", Units = "cm"))
 	float TargetLoseRadius = 6500.0f;
 
-	/** 敌人与目标的水平距离不大于该值时进入 ReadyToAttack。 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Movement", meta = (ClampMin = "0.0", Units = "cm"))
-	float AttackReadyDistance = 160.0f;
-
-	/** ReadyToAttack 后目标超过该距离才恢复追踪，用于避免边界抖动。 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Movement", meta = (ClampMin = "0.0", Units = "cm"))
-	float ResumeMoveDistance = 220.0f;
+	/** 胶囊表面接触后立即造成一次伤害，随后按独立节拍重复。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Combat")
+	FGobulinEnemyContactDamageDefinition ContactDamage;
 
 	/** 索敌与距离决策频率；路径跟随本身仍由 CharacterMovement 每帧执行。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Targeting", meta = (ClampMin = "0.05", Units = "s"))
@@ -65,9 +63,9 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Lifecycle", meta = (ClampMin = "0.0", Units = "s"))
 	float SpawnDuration = 0.15f;
 
-	/** 死亡状态持续时间；到期后统一回收 Actor/Entity。 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Lifecycle", meta = (ClampMin = "0.0", Units = "s"))
-	float DeathDuration = 0.6f;
+	/** 普通受击、硬直、致死击飞与尸体回收的统一参数。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Reaction")
+	FGobulinEnemyReactionDefinition Reaction;
 
 	/** 逻辑身体尺寸；生成占位、Actor 胶囊和未来 Mass 碰撞共同读取。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Body")

@@ -34,7 +34,8 @@ public class GobulinGame : ModuleRules
 			"Niagara",
 			"Paper2D",
 			"UMG",
-			"Slate"
+			"Slate",
+			"SlateCore"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {
@@ -59,9 +60,6 @@ public class GobulinGame : ModuleRules
 			"GobulinGame/Variant_Shooter/UI",
 			"GobulinGame/Variant_Shooter/Weapons"
 		});
-
-		// Uncomment if you are using Slate UI
-		// PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });
 
 		// Uncomment if you are using online features
 		// PrivateDependencyModuleNames.Add("OnlineSubsystem");

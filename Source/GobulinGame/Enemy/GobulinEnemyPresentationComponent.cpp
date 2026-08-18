@@ -7,6 +7,16 @@
 #include "Materials/MaterialInterface.h"
 #include "PaperFlipbook.h"
 
+namespace
+{
+	constexpr int32 HitFlashAmountDataIndex = 0;
+	constexpr int32 LethalFlashSelectorDataIndex = 1;
+	constexpr int32 ReservedReactionDataIndex2 = 2;
+	constexpr int32 ReservedReactionDataIndex3 = 3;
+	constexpr int32 DeathDarkenAmountDataIndex = 4;
+	constexpr int32 OpacityDataIndex = 5;
+}
+
 UGobulinEnemyPresentationComponent::UGobulinEnemyPresentationComponent()
 {
 	SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -26,6 +36,8 @@ void UGobulinEnemyPresentationComponent::TickComponent(
 		return;
 	}
 
+	UpdateReactionEffects(GetWorld()->GetTimeSeconds());
+
 	FVector ViewerLocation = FVector::ZeroVector;
 	const bool bHasViewer = TryGetViewerLocation(ViewerLocation);
 	if (bHasViewer)
@@ -44,17 +56,87 @@ void UGobulinEnemyPresentationComponent::ApplyDefinition(
 	SetTranslucentSortPriority(Definition.TranslucencySortPriority);
 	SetCastShadow(Definition.bCastShadow);
 	SetMaterial(0, Definition.MaterialOverride.Get());
+	ResetReactionMaterialData();
 	Stop();
 	SetFlipbook(nullptr);
 	SetVisibility(false, true);
 	CurrentVisualState = EGobulinEnemyVisualState::Inactive;
 	CurrentMoveDirection = EGobulinEnemyMoveDirection::TowardViewer;
 	CurrentLocomotionAnimation = EGobulinEnemyLocomotionAnimation::Idle;
+	bLocomotionSuspended = false;
+	bDeathEffectsActive = false;
+	bDeathPresentationComplete = false;
+	HitFlashStartTime = 0.0f;
+	HitFlashDuration = 0.0f;
+	DeathStartTime = 0.0f;
+	DeathLandedTime = 0.0f;
+	ActiveReactionDefinition = FGobulinEnemyReactionDefinition();
 }
 
 void UGobulinEnemyPresentationComponent::ApplyEnemyState(EEnemyState EnemyState)
 {
 	ApplyVisualState(GetEnemyVisualState(EnemyState));
+}
+
+void UGobulinEnemyPresentationComponent::SetLocomotionSuspended(bool bSuspended)
+{
+	if (bLocomotionSuspended == bSuspended)
+	{
+		return;
+	}
+
+	bLocomotionSuspended = bSuspended;
+	if (bLocomotionSuspended && CurrentVisualState == EGobulinEnemyVisualState::Alive)
+	{
+		ApplyLocomotion(
+			EGobulinEnemyMoveDirection::TowardViewer,
+			EGobulinEnemyLocomotionAnimation::Idle,
+			false,
+			false);
+	}
+}
+
+void UGobulinEnemyPresentationComponent::BeginHitFlash(
+	bool bLethal,
+	const FGobulinEnemyReactionDefinition& ReactionDefinition)
+{
+	if (!GetWorld())
+	{
+		return;
+	}
+
+	HitFlashStartTime = GetWorld()->GetTimeSeconds();
+	HitFlashDuration = bLethal
+		? ReactionDefinition.LethalFlashDuration
+		: ReactionDefinition.HitFlashDuration;
+	SetCustomPrimitiveDataFloat(LethalFlashSelectorDataIndex, bLethal ? 1.0f : 0.0f);
+	SetCustomPrimitiveDataFloat(HitFlashAmountDataIndex, HitFlashDuration > 0.0f ? 1.0f : 0.0f);
+}
+
+void UGobulinEnemyPresentationComponent::BeginDeathEffects(
+	const FGobulinEnemyReactionDefinition& ReactionDefinition)
+{
+	if (!GetWorld())
+	{
+		return;
+	}
+
+	ActiveReactionDefinition = ReactionDefinition;
+	bDeathEffectsActive = true;
+	bDeathPresentationComplete = false;
+	DeathStartTime = GetWorld()->GetTimeSeconds();
+	DeathLandedTime = 0.0f;
+	SetCustomPrimitiveDataFloat(DeathDarkenAmountDataIndex, 0.0f);
+	SetCustomPrimitiveDataFloat(OpacityDataIndex, 1.0f);
+	BeginHitFlash(true, ReactionDefinition);
+}
+
+void UGobulinEnemyPresentationComponent::NotifyDeathLanded()
+{
+	if (bDeathEffectsActive && DeathLandedTime <= 0.0f && GetWorld())
+	{
+		DeathLandedTime = GetWorld()->GetTimeSeconds();
+	}
 }
 
 void UGobulinEnemyPresentationComponent::ApplyVisualState(
@@ -68,6 +150,12 @@ void UGobulinEnemyPresentationComponent::ApplyVisualState(
 		CurrentVisualState = VisualState;
 		return;
 	}
+
+	UMaterialInterface* DesiredMaterial = VisualState == EGobulinEnemyVisualState::Death
+		&& !Definition.DeathMaterialOverride.IsNull()
+		? Definition.DeathMaterialOverride.Get()
+		: Definition.MaterialOverride.Get();
+	SetMaterial(0, DesiredMaterial);
 
 	const EGobulinEnemyLocomotionAnimation DesiredLocomotion =
 		VisualState == EGobulinEnemyVisualState::Alive
@@ -100,7 +188,7 @@ void UGobulinEnemyPresentationComponent::ApplyVisualState(
 	if (VisualState == EGobulinEnemyVisualState::Death)
 	{
 		SetFlipbook(Flipbook);
-		SetLooping(false);
+		SetLooping(Definition.bLoopDeathFlipbook);
 		PlayFromStart();
 		return;
 	}
@@ -216,7 +304,7 @@ void UGobulinEnemyPresentationComponent::UpdateMovementPresentation(
 	const FVector& ViewerLocation,
 	bool bHasViewer)
 {
-	if (CurrentVisualState != EGobulinEnemyVisualState::Alive)
+	if (CurrentVisualState != EGobulinEnemyVisualState::Alive || bLocomotionSuspended)
 	{
 		return;
 	}
@@ -252,6 +340,69 @@ void UGobulinEnemyPresentationComponent::UpdateMovementPresentation(
 		EGobulinEnemyLocomotionAnimation::Run,
 		false,
 		true);
+}
+
+void UGobulinEnemyPresentationComponent::UpdateReactionEffects(float WorldTime)
+{
+	if (HitFlashDuration > 0.0f)
+	{
+		const float FlashAlpha = 1.0f - FMath::Clamp(
+			(WorldTime - HitFlashStartTime) / HitFlashDuration,
+			0.0f,
+			1.0f);
+		SetCustomPrimitiveDataFloat(HitFlashAmountDataIndex, FlashAlpha);
+		if (FlashAlpha <= 0.0f)
+		{
+			HitFlashDuration = 0.0f;
+		}
+	}
+
+	if (!bDeathEffectsActive)
+	{
+		return;
+	}
+
+	const float DarkenElapsed = WorldTime
+		- DeathStartTime
+		- ActiveReactionDefinition.DeathDarkenDelay;
+	const float DarkenAlpha = ActiveReactionDefinition.DeathDarkenDuration > KINDA_SMALL_NUMBER
+		? FMath::Clamp(DarkenElapsed / ActiveReactionDefinition.DeathDarkenDuration, 0.0f, 1.0f)
+		: (DarkenElapsed >= 0.0f ? 1.0f : 0.0f);
+	SetCustomPrimitiveDataFloat(
+		DeathDarkenAmountDataIndex,
+		FMath::SmoothStep(0.0f, 1.0f, DarkenAlpha)
+			* ActiveReactionDefinition.DeathMaximumDarken);
+
+	const float FailsafeFadeStartTime = DeathStartTime
+		+ FMath::Max(
+			0.0f,
+			ActiveReactionDefinition.DeathMaximumDuration
+				- ActiveReactionDefinition.CorpseFadeDuration);
+	const float FadeStartTime = DeathLandedTime > 0.0f
+		? FMath::Min(
+			DeathLandedTime + ActiveReactionDefinition.CorpseSettleDelay,
+			FailsafeFadeStartTime)
+		: FailsafeFadeStartTime;
+	const float FadeAlpha = FMath::Clamp(
+		(WorldTime - FadeStartTime) / ActiveReactionDefinition.CorpseFadeDuration,
+		0.0f,
+		1.0f);
+	SetCustomPrimitiveDataFloat(OpacityDataIndex, 1.0f - FMath::SmoothStep(0.0f, 1.0f, FadeAlpha));
+	if (FadeAlpha >= 1.0f)
+	{
+		bDeathEffectsActive = false;
+		bDeathPresentationComplete = true;
+	}
+}
+
+void UGobulinEnemyPresentationComponent::ResetReactionMaterialData()
+{
+	SetCustomPrimitiveDataFloat(HitFlashAmountDataIndex, 0.0f);
+	SetCustomPrimitiveDataFloat(LethalFlashSelectorDataIndex, 0.0f);
+	SetCustomPrimitiveDataFloat(ReservedReactionDataIndex2, 0.0f);
+	SetCustomPrimitiveDataFloat(ReservedReactionDataIndex3, 0.0f);
+	SetCustomPrimitiveDataFloat(DeathDarkenAmountDataIndex, 0.0f);
+	SetCustomPrimitiveDataFloat(OpacityDataIndex, 1.0f);
 }
 
 EGobulinEnemyMoveDirection UGobulinEnemyPresentationComponent::SelectMoveDirection(

@@ -7,6 +7,7 @@
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
+#include "Materials/MaterialInterface.h"
 #include "PaperFlipbook.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -44,16 +45,35 @@ int32 UEnemyAssetSetupCommandlet::Main(const FString& Params)
 		Archetype->MoveSpeed = 300.0f;
 		Archetype->TargetAcquisitionRadius = 5000.0f;
 		Archetype->TargetLoseRadius = 6500.0f;
-		Archetype->AttackReadyDistance = 160.0f;
-		Archetype->ResumeMoveDistance = 220.0f;
+		Archetype->ContactDamage.bEnabled = true;
+		Archetype->ContactDamage.BaseDamage = 10.0f;
+		Archetype->ContactDamage.DamageInterval = 0.8f;
+		Archetype->ContactDamage.ContactEnterTolerance = 5.0f;
+		Archetype->ContactDamage.ContactExitTolerance = 15.0f;
 		Archetype->DecisionInterval = 0.25f;
 		Archetype->NavigationRetryDelay = 1.0f;
 		Archetype->bUseRVOAvoidance = true;
 		Archetype->AvoidanceConsiderationRadius = 250.0f;
 		Archetype->SpawnDuration = 0.15f;
-		Archetype->DeathDuration = 0.6f;
 		Archetype->Body.CapsuleRadius = 34.0f;
 		Archetype->Body.CapsuleHalfHeight = 88.0f;
+	}
+
+	// 只补齐空的语义标签，保留内容制作者已经选择的自定义攻击与伤害类型。
+	if (!Archetype->ContactDamage.AttackTag.IsValid())
+	{
+		Archetype->ContactDamage.AttackTag = FGameplayTag::RequestGameplayTag(
+			TEXT("Combat.Attack.Melee"));
+	}
+	if (!Archetype->ContactDamage.DamageType.IsValid())
+	{
+		Archetype->ContactDamage.DamageType = FGameplayTag::RequestGameplayTag(
+			TEXT("Combat.Damage.Physical"));
+	}
+	if (!Archetype->Reaction.HeavyAttackTag.IsValid())
+	{
+		Archetype->Reaction.HeavyAttackTag = FGameplayTag::RequestGameplayTag(
+			TEXT("Combat.Attack.Melee.Heavy"));
 	}
 
 	UPaperFlipbook* IdleTowardFlipbook = LoadObject<UPaperFlipbook>(
@@ -82,7 +102,13 @@ int32 UEnemyAssetSetupCommandlet::Main(const FString& Params)
 		TEXT("/Game/Art/PaperAssets/Party/FieldPaladin/FieldPaladin__Run_R.FieldPaladin__Run_R"));
 	UPaperFlipbook* DeathFlipbook = LoadObject<UPaperFlipbook>(
 		nullptr,
-		TEXT("/Game/Art/PaperAssets/Party/BattleMage/BattleMage__Downed.BattleMage__Downed"));
+		TEXT("/Game/Art/PaperAssets/Party/BattlePaladin/BattlePaladin__Downed.BattlePaladin__Downed"));
+	UMaterialInterface* AliveMaterial = LoadObject<UMaterialInterface>(
+		nullptr,
+		TEXT("/Game/_Game/Material/Enemy/M_GobulinEnemySpriteMasked.M_GobulinEnemySpriteMasked"));
+	UMaterialInterface* DeathMaterial = LoadObject<UMaterialInterface>(
+		nullptr,
+		TEXT("/Game/_Game/Material/Enemy/M_GobulinEnemySpriteTranslucent.M_GobulinEnemySpriteTranslucent"));
 	if (!IdleTowardFlipbook
 		|| !IdleAwayFlipbook
 		|| !IdleLeftFlipbook
@@ -91,9 +117,11 @@ int32 UEnemyAssetSetupCommandlet::Main(const FString& Params)
 		|| !RunAwayFlipbook
 		|| !RunLeftFlipbook
 		|| !RunRightFlipbook
-		|| !DeathFlipbook)
+		|| !DeathFlipbook
+		|| !AliveMaterial
+		|| !DeathMaterial)
 	{
-		UE_LOG(LogTemp, Error, TEXT("[EnemyAssetSetup] Missing one or more FieldPaladin Idle/Run or temporary Death PaperFlipbooks."));
+		UE_LOG(LogTemp, Error, TEXT("[EnemyAssetSetup] Missing FieldPaladin flipbooks, temporary Death flipbook, or generated enemy materials."));
 		return 1;
 	}
 
@@ -111,10 +139,12 @@ int32 UEnemyAssetSetupCommandlet::Main(const FString& Params)
 	{
 		Archetype->Presentation.Flipbooks.Death = DeathFlipbook;
 	}
+	Archetype->Presentation.MaterialOverride = AliveMaterial;
+	Archetype->Presentation.DeathMaterialOverride = DeathMaterial;
+	Archetype->Presentation.bLoopDeathFlipbook = true;
 
 	if (bCreatedNewAsset)
 	{
-		Archetype->Presentation.MaterialOverride.Reset();
 		Archetype->Presentation.SpriteColor = FLinearColor::White;
 		Archetype->Presentation.TranslucencySortPriority = 0;
 		Archetype->Presentation.bCastShadow = false;

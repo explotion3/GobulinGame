@@ -15,7 +15,16 @@ class UStaticMeshComponent;
 class UGobulinCameraFeedbackComponent;
 class UGobulinSwordFeedbackComponent;
 class UGobulinWeaponViewComponent;
+class UGobulinPlayerStatusWidget;
 struct FInputActionValue;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+	FGobulinPlayerDamagedSignature,
+	FCombatDamageRequest, Request,
+	FCombatDamageResult, Result);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+	FGobulinPlayerDiedSignature,
+	FCombatDamageResult, Result);
 
 /**
  * 正式玩家角色：负责角色本体、移动、相机、属性和输入路由。
@@ -62,6 +71,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Player")
 	bool IsDead() const { return bDead; }
 
+	UFUNCTION(BlueprintPure, Category = "Player|UI")
+	UGobulinPlayerStatusWidget* GetPlayerStatusWidget() const { return PlayerStatusWidget; }
+
+	/** 仅在伤害已经实际扣除后广播，UI 与表现层可以安全订阅。 */
+	UPROPERTY(BlueprintAssignable, Category = "Player|Combat")
+	FGobulinPlayerDamagedSignature OnPlayerDamaged;
+
+	/** 仅在玩家第一次进入死亡状态时广播。 */
+	UPROPERTY(BlueprintAssignable, Category = "Player|Combat")
+	FGobulinPlayerDiedSignature OnPlayerDied;
+
 	UFUNCTION(BlueprintCallable, Category = "Player|Movement")
 	void SetSprinting(bool bInSprinting);
 
@@ -93,6 +113,17 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UGobulinSwordFeedbackComponent> SwordFeedback;
+
+	// ---------- Temporary Player UI ----------
+	/**
+	 * 当前默认使用原生 C++ 状态界面。后续正式 UI 可将这里替换为
+	 * UGobulinPlayerStatusWidget 的蓝图子类，不需要修改玩家伤害流程。
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|UI")
+	TSubclassOf<UGobulinPlayerStatusWidget> PlayerStatusWidgetClass;
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Player|UI")
+	TObjectPtr<UGobulinPlayerStatusWidget> PlayerStatusWidget;
 
 	// ---------- Enhanced Input ----------
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
@@ -160,9 +191,11 @@ protected:
 	void SprintCompleted();
 	void SwordAttackStarted();
 	void SwordAttackCompleted();
+	void CreatePlayerStatusWidget();
+	void RefreshPlayerStatusWidget();
 
 	void ApplyMovementSettings();
-	void Die();
+	void Die(const FCombatDamageResult& KillingResult);
 
 	bool CanJumpDuringSwordState() const;
 	bool CanSprintDuringSwordState() const;
@@ -172,4 +205,7 @@ protected:
 
 	UFUNCTION()
 	void OnAttributeChanged(FGameplayTag AttributeTag, float NewValue);
+
+	UFUNCTION()
+	void HandleRestartRequested();
 };

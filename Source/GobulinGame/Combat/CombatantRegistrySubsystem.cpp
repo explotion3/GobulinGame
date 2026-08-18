@@ -4,11 +4,16 @@
 #include "GameFramework/Actor.h"
 #include "UObject/ObjectKey.h"
 
-FCombatantHandle UCombatantRegistrySubsystem::RegisterActor(AActor* Actor, uint8 TeamId)
+FCombatantHandle UCombatantRegistrySubsystem::RegisterActor(
+	AActor* Actor,
+	uint8 TeamId,
+	const FCombatantBodyShape& BodyShape)
 {
 	check(IsInGameThread());
 
-	if (!IsValid(Actor) || !Actor->GetClass()->ImplementsInterface(UCombatantEndpoint::StaticClass()))
+	if (!IsValid(Actor)
+		|| !BodyShape.IsValid()
+		|| !Actor->GetClass()->ImplementsInterface(UCombatantEndpoint::StaticClass()))
 	{
 		return FCombatantHandle();
 	}
@@ -20,6 +25,7 @@ FCombatantHandle UCombatantRegistrySubsystem::RegisterActor(AActor* Actor, uint8
 		{
 			FRegistrySlot& ExistingSlot = Slots[ExistingHandle->GetIndex()];
 			ExistingSlot.TeamId = TeamId;
+			ExistingSlot.BodyShape = BodyShape;
 			ExistingSlot.bActive = true;
 			return *ExistingHandle;
 		}
@@ -40,6 +46,7 @@ FCombatantHandle UCombatantRegistrySubsystem::RegisterActor(AActor* Actor, uint8
 	Slot.Generation = Slot.Generation >= MAX_int32 ? 1 : FMath::Max(1, Slot.Generation + 1);
 	Slot.Actor = Actor;
 	Slot.TeamId = TeamId;
+	Slot.BodyShape = BodyShape;
 	Slot.bOccupied = true;
 	Slot.bActive = true;
 
@@ -83,6 +90,7 @@ bool UCombatantRegistrySubsystem::UnregisterHandle(FCombatantHandle Handle)
 	}
 
 	Slot.Actor.Reset();
+	Slot.BodyShape = FCombatantBodyShape();
 	Slot.TeamId = 0;
 	Slot.bOccupied = false;
 	Slot.bActive = false;
@@ -113,6 +121,21 @@ bool UCombatantRegistrySubsystem::SetCombatantTeam(FCombatantHandle Handle, uint
 	}
 
 	Slots[Handle.GetIndex()].TeamId = TeamId;
+	return true;
+}
+
+bool UCombatantRegistrySubsystem::SetCombatantBodyShape(
+	FCombatantHandle Handle,
+	const FCombatantBodyShape& BodyShape)
+{
+	check(IsInGameThread());
+
+	if (!IsHandleValid(Handle) || !BodyShape.IsValid())
+	{
+		return false;
+	}
+
+	Slots[Handle.GetIndex()].BodyShape = BodyShape;
 	return true;
 }
 
@@ -173,6 +196,7 @@ bool UCombatantRegistrySubsystem::GetCombatantSnapshot(
 	OutSnapshot.Handle = Handle;
 	OutSnapshot.TeamId = Slot.TeamId;
 	OutSnapshot.Location = Actor->GetActorLocation();
+	OutSnapshot.BodyShape = Slot.BodyShape;
 	OutSnapshot.bActive = Slot.bActive;
 	return true;
 }
@@ -197,6 +221,7 @@ void UCombatantRegistrySubsystem::GetCombatantSnapshots(
 		Snapshot.Handle = FCombatantHandle(SlotIndex, Slot.Generation);
 		Snapshot.TeamId = Slot.TeamId;
 		Snapshot.Location = Actor->GetActorLocation();
+		Snapshot.BodyShape = Slot.BodyShape;
 		Snapshot.bActive = Slot.bActive;
 	}
 }

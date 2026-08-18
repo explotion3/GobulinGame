@@ -1,0 +1,91 @@
+Shader(Name="_Game/Material/Enemy/M_GobulinEnemySpriteMasked")
+{
+    Properties = {
+        SpriteTextureSampler SpriteTexture [
+            Group="敌人纸片|Paper2D";
+            SortPriority=0;
+            Description="PaperFlipbookComponent 自动注入的当前帧图集纹理。";
+            SamplerType="Color";
+        ];
+
+        VectorParameter HitFlashColor = float4(1.0, 1.0, 1.0, 1.0) [
+            Group="敌人纸片|材质实例"; SortPriority=0;
+            Description="普通受击闪色。通常保持白色，Alpha 不参与混合。";
+        ];
+        ScalarParameter HitFlashPeakOpacity = 1.0 [
+            Group="敌人纸片|材质实例"; SortPriority=1;
+            Description="普通受击闪色最亮时刻的覆盖强度；0 为关闭，1 为完全覆盖。";
+        ];
+        VectorParameter LethalFlashColor = float4(1.0, 0.0, 0.0, 1.0) [
+            Group="敌人纸片|材质实例"; SortPriority=2;
+            Description="致死一击闪色。Alpha 不参与混合。";
+        ];
+        ScalarParameter LethalFlashPeakOpacity = 1.0 [
+            Group="敌人纸片|材质实例"; SortPriority=3;
+            Description="致死闪色峰值覆盖强度；0 为关闭，1 为完全覆盖。";
+        ];
+        VectorParameter DeathDarkenColor = float4(0.0, 0.0, 0.0, 1.0) [
+            Group="敌人纸片|材质实例"; SortPriority=4;
+            Description="死亡逐渐变暗时趋近的颜色。Alpha 不参与混合。";
+        ];
+        ScalarParameter SpriteBrightness = 1.0 [
+            Group="敌人纸片|材质实例"; SortPriority=5;
+            Description="纸片最终自发光亮度倍率。建议从 1 开始微调。";
+        ];
+
+        ScalarParameter HitFlashAmount = 0.0 [
+            Group="敌人纸片|运行时CPD"; SortPriority=10;
+            Description="CPD[0]：运行时闪色包络，材质实例无需修改。";
+            UseCustomPrimitiveData=true; PrimitiveDataIndex=0;
+        ];
+        ScalarParameter LethalFlashSelector = 0.0 [
+            Group="敌人纸片|运行时CPD"; SortPriority=11;
+            Description="CPD[1]：0 为普通受击，1 为致死受击。";
+            UseCustomPrimitiveData=true; PrimitiveDataIndex=1;
+        ];
+        ScalarParameter ReservedReactionData2 = 0.0 [
+            Group="敌人纸片|运行时CPD"; SortPriority=12;
+            Description="CPD[2]：为后续敌人反应保留。";
+            UseCustomPrimitiveData=true; PrimitiveDataIndex=2;
+        ];
+        ScalarParameter ReservedReactionData3 = 0.0 [
+            Group="敌人纸片|运行时CPD"; SortPriority=13;
+            Description="CPD[3]：为后续敌人反应保留。";
+            UseCustomPrimitiveData=true; PrimitiveDataIndex=3;
+        ];
+        ScalarParameter DeathDarkenAmount = 0.0 [
+            Group="敌人纸片|运行时CPD"; SortPriority=14;
+            Description="CPD[4]：死亡逐黑强度。";
+            UseCustomPrimitiveData=true; PrimitiveDataIndex=4;
+        ];
+    }
+
+    Settings = {
+        Backend = "Graph";
+        Domain = "Surface";
+        ShadingModel = "Unlit";
+        BlendMode = "Masked";
+        TwoSided = true;
+        OpacityMaskClipValue = 0.1;
+    }
+
+    Outputs = {
+        float3 Color;
+        float AlphaMask;
+        Base.EmissiveColor = Color;
+        Base.OpacityMask = AlphaMask;
+    }
+
+    Graph = {
+        float4 vertexColor = UE.VertexColor();
+        float3 baseColor = SpriteTexture.rgb * vertexColor.rgb;
+        float lethalFlash = saturate(LethalFlashSelector);
+        float3 flashColor = lerp(HitFlashColor.rgb, LethalFlashColor.rgb, lethalFlash);
+        float flashPeakOpacity = lerp(HitFlashPeakOpacity, LethalFlashPeakOpacity, lethalFlash);
+        float flashBlend = saturate(HitFlashAmount * flashPeakOpacity);
+        float3 flashedColor = lerp(baseColor, flashColor, flashBlend);
+        float3 darkenedColor = lerp(flashedColor, DeathDarkenColor.rgb, saturate(DeathDarkenAmount));
+        Color = darkenedColor * max(SpriteBrightness, 0.0);
+        AlphaMask = SpriteTexture.a * vertexColor.a;
+    }
+}
