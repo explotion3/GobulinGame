@@ -75,6 +75,7 @@ Shader(Name="_Game/Material/Enemy/M_GobulinEnemySpriteTranslucent")
         ShadingModel = "Unlit";
         BlendMode = "Translucent";
         TwoSided = true;
+        bCastDynamicShadowAsMasked = true;
     }
 
     Outputs = {

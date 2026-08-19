@@ -72,8 +72,9 @@ void UGobulinCameraFeedbackComponent::TickComponent(
 	const FVector RightDirection = Pawn ? Pawn->GetActorRightVector() : FVector::YAxisVector;
 	const float StrafeSpeed = FVector::DotProduct(PlanarVelocity, RightDirection);
 	const float StrafeAlpha = FMath::Clamp(StrafeSpeed / MaximumMovementSpeed, -1.0f, 1.0f);
+	const float StrafeRollDirection = bInvertStrafeRoll ? 1.0f : -1.0f;
 	const float TargetStrafeRoll = bEnableStrafeRoll && bIsGrounded
-		? -StrafeAlpha * StrafeRollAngle
+		? StrafeRollDirection * StrafeAlpha * StrafeRollAngle
 		: 0.0f;
 	CurrentStrafeRoll = FMath::FInterpTo(CurrentStrafeRoll, TargetStrafeRoll, DeltaTime, StrafeRollInterpSpeed);
 

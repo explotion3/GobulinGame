@@ -46,6 +46,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera Feedback|Movement")
 	bool bEnableStrafeRoll = true;
 
+	/** 是否反转左右移动对应的相机侧倾方向。关闭时保持当前侧倾方向。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera Feedback|Movement")
+	bool bInvertStrafeRoll = false;
+
 	/** Maximum camera roll in degrees while strafing at full speed. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera Feedback|Movement", meta = (ClampMin = "0.0"))
 	float StrafeRollAngle = 1.0f;

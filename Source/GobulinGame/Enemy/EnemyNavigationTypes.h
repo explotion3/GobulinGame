@@ -18,6 +18,8 @@ enum class EEnemyMoveStatus : uint8
 {
 	Idle,
 	Moving,
+	/** NavMesh 无法继续，但怪潮仍以局部压力和目标方向直接推进。 */
+	CrowdPushing,
 	Reached,
 	Blocked,
 	Failed

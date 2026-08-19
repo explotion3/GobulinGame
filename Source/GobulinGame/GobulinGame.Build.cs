@@ -7,6 +7,7 @@ public class GobulinGame : ModuleRules
 	public GobulinGame(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+		SetupGameplayDebuggerSupport(Target);
 
 		PublicDependencyModuleNames.AddRange(new string[] {
 			"Core",

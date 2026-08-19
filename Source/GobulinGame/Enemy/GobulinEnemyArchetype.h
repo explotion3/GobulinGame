@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "Enemy/EnemyContactDamageTypes.h"
+#include "Enemy/EnemyCrowdTypes.h"
 #include "Enemy/EnemyReactionTypes.h"
 #include "Enemy/GobulinEnemyPresentationTypes.h"
 #include "Enemy/GobulinEnemyRuntimeData.h"
@@ -58,6 +59,10 @@ public:
 	/** RVO 查询附近移动体的范围；仅影响当前 Actor 后端。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Movement", meta = (ClampMin = "1.0", Units = "cm"))
 	float AvoidanceConsiderationRadius = 250.0f;
+
+	/** 连续堆积、局部压力和脱离 NavMesh 后直推所使用的统一怪潮参数。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Crowd")
+	FGobulinEnemyCrowdDefinition Crowd;
 
 	/** 出生状态持续时间；为零时会在下一个子系统更新中完成出生。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Lifecycle", meta = (ClampMin = "0.0", Units = "s"))

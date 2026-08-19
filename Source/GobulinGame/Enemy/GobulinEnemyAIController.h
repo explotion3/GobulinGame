@@ -16,8 +16,16 @@ class GOBULINGAME_API AGobulinEnemyAIController : public AAIController
 public:
 	AGobulinEnemyAIController();
 
+	/** 只计算完整路径，不提交 PathFollowing 请求，也不会清空当前移动速度。 */
+	bool HasCompletePathToTarget(AActor* TargetActor, const FEnemyMoveIntent& Intent) const;
 	EEnemyMoveStatus RequestMoveToTarget(AActor* TargetActor, const FEnemyMoveIntent& Intent);
 	void StopEnemyMove();
+
+	/** 只读调试数据，不参与移动规则。 */
+	void GetEnemyNavigationDebugData(
+		FString& OutPathStatus,
+		bool& bOutHasActiveIntent,
+		TArray<FVector>& OutPathPoints) const;
 
 protected:
 	virtual void OnMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result) override;

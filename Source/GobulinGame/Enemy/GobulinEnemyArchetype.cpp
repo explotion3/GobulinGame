@@ -27,6 +27,7 @@ bool UGobulinEnemyArchetype::IsDefinitionValid() const
 		&& NavigationRetryDelay >= 0.05f
 		&& FMath::IsFinite(AvoidanceConsiderationRadius)
 		&& AvoidanceConsiderationRadius >= 1.0f
+		&& Crowd.IsValid()
 		&& FMath::IsFinite(SpawnDuration)
 		&& SpawnDuration >= 0.0f
 		&& Reaction.IsValid()
@@ -62,6 +63,7 @@ FGobulinEnemyRuntimeStats UGobulinEnemyArchetype::BuildRuntimeStats(float PowerS
 	Stats.NavigationRetryDelay = FMath::Max(0.05f, NavigationRetryDelay);
 	Stats.SpawnDuration = FMath::Max(0.0f, SpawnDuration);
 	Stats.Reaction = Reaction;
+	Stats.Crowd = Crowd;
 	if (!Stats.Reaction.HeavyAttackTag.IsValid())
 	{
 		Stats.Reaction.HeavyAttackTag = CombatTag_Attack_Melee_Heavy;

@@ -5,12 +5,17 @@
 #include "Core/GobulinCollisionChannels.h"
 #include "Enemy/GobulinEnemyAIController.h"
 #include "Enemy/GobulinEnemyArchetype.h"
+#include "Enemy/GobulinEnemyMovementComponent.h"
 #include "Enemy/GobulinEnemyPresentationComponent.h"
 #include "Enemy/GobulinEnemySubsystem.h"
 #include "Engine/CollisionProfile.h"
+#include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
-AGobulinEnemyActor::AGobulinEnemyActor()
+
+AGobulinEnemyActor::AGobulinEnemyActor(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer.SetDefaultSubobjectClass<UGobulinEnemyMovementComponent>(
+		ACharacter::CharacterMovementComponentName))
 {
 	PrimaryActorTick.bCanEverTick = false;
 	PrimaryActorTick.bStartWithTickEnabled = false;
@@ -18,6 +23,10 @@ AGobulinEnemyActor::AGobulinEnemyActor()
 	UCapsuleComponent* CollisionCapsule = GetCapsuleComponent();
 	CollisionCapsule->InitCapsuleSize(34.0f, 88.0f);
 	CollisionCapsule->SetCollisionProfileName(UCollisionProfile::Pawn_ProfileName);
+	CollisionCapsule->SetCollisionObjectType(GobulinCollision::EnemyBody);
+	CollisionCapsule->SetCollisionResponseToChannel(GobulinCollision::EnemyBody, ECR_Ignore);
+	CollisionCapsule->SetCollisionResponseToChannel(GobulinCollision::EnemySwarmBoundary, ECR_Block);
+	CollisionCapsule->SetCollisionResponseToChannel(GobulinCollision::EnemyCorpse, ECR_Block);
 	CollisionCapsule->SetCollisionResponseToChannel(GobulinCollision::CombatTrace, ECR_Overlap);
 	CollisionCapsule->SetGenerateOverlapEvents(false);
 	CollisionCapsule->CanCharacterStepUpOn = ECanBeCharacterBase::ECB_No;
@@ -35,9 +44,10 @@ AGobulinEnemyActor::AGobulinEnemyActor()
 	Movement->MaxWalkSpeed = 300.0f;
 	Movement->MaxAcceleration = 1200.0f;
 	Movement->BrakingDecelerationWalking = 1200.0f;
-	Movement->bCanWalkOffLedges = false;
+	Movement->bCanWalkOffLedges = true;
 	Movement->bUseRVOAvoidance = true;
 	Movement->AvoidanceConsiderationRadius = 250.0f;
+	GetEnemyMovementComponent()->ConfigureGroundSupport(3.0f, 8.0f);
 
 	AIControllerClass = AGobulinEnemyAIController::StaticClass();
 	AutoPossessAI = EAutoPossessAI::Spawned;
@@ -109,12 +119,24 @@ void AGobulinEnemyActor::InitializeEnemy(FCombatantHandle InHandle, const UGobul
 		Archetype.Body.CapsuleHalfHeight,
 		true);
 	GetCharacterMovement()->MaxWalkSpeed = Archetype.MoveSpeed;
-	GetCharacterMovement()->SetAvoidanceEnabled(Archetype.bUseRVOAvoidance);
+	GetCharacterMovement()->SetAvoidanceEnabled(
+		Archetype.bUseRVOAvoidance && !Archetype.Crowd.bEnableContinuousPiling);
 	GetCharacterMovement()->AvoidanceConsiderationRadius = Archetype.AvoidanceConsiderationRadius;
+	GetEnemyMovementComponent()->ConfigureGroundSupport(
+		Archetype.Crowd.GroundSupportRadius,
+		Archetype.Crowd.GroundSnapDownHeight);
+	GetCapsuleComponent()->SetCollisionResponseToChannel(
+		GobulinCollision::EnemyBody,
+		Archetype.Crowd.bEnableContinuousPiling ? ECR_Ignore : ECR_Block);
 	ReactionDefinition = Archetype.Reaction;
 	FeetAnchor->SetRelativeLocation(FVector(0.0f, 0.0f, -Archetype.Body.CapsuleHalfHeight));
 	PresentationComponent->ApplyDefinition(Archetype.Presentation);
 	ApplyEnemyState(EEnemyState::Spawning);
+}
+
+UGobulinEnemyMovementComponent* AGobulinEnemyActor::GetEnemyMovementComponent() const
+{
+	return CastChecked<UGobulinEnemyMovementComponent>(GetCharacterMovement());
 }
 
 void AGobulinEnemyActor::ApplyEnemyState(EEnemyState NewState)
@@ -150,6 +172,15 @@ EEnemyMoveStatus AGobulinEnemyActor::RequestMoveToTarget(
 		: EEnemyMoveStatus::Failed;
 }
 
+bool AGobulinEnemyActor::HasCompleteNavigationPathToTarget(
+	AActor* TargetActor,
+	const FEnemyMoveIntent& Intent) const
+{
+	const AGobulinEnemyAIController* EnemyController =
+		Cast<AGobulinEnemyAIController>(GetController());
+	return EnemyController && EnemyController->HasCompletePathToTarget(TargetActor, Intent);
+}
+
 void AGobulinEnemyActor::StopEnemyMovement()
 {
 	if (AGobulinEnemyAIController* EnemyController = Cast<AGobulinEnemyAIController>(GetController()))
@@ -157,6 +188,82 @@ void AGobulinEnemyActor::StopEnemyMovement()
 		EnemyController->StopEnemyMove();
 	}
 	GetCharacterMovement()->StopMovementImmediately();
+}
+
+FVector AGobulinEnemyActor::ApplyCrowdVelocityChange(
+	const FVector& VelocityChange,
+	float MaximumLiftSpeed,
+	float DeltaTime)
+{
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	if (!Movement
+		|| Movement->MovementMode == MOVE_None
+		|| VelocityChange.ContainsNaN()
+		|| !FMath::IsFinite(DeltaTime)
+		|| DeltaTime <= 0.0f)
+	{
+		return FVector::ZeroVector;
+	}
+
+	FVector AppliedVelocityChange = FVector::ZeroVector;
+	const FVector HorizontalChange(VelocityChange.X, VelocityChange.Y, 0.0f);
+	const float MaximumAcceleration = FMath::Max(0.0f, Movement->GetMaxAcceleration());
+	const float MaximumInputVelocityChange = MaximumAcceleration * DeltaTime;
+	if (!HorizontalChange.IsNearlyZero() && MaximumInputVelocityChange > KINDA_SMALL_NUMBER)
+	{
+		const float AppliedMagnitude = FMath::Min(
+			HorizontalChange.Size(),
+			MaximumInputVelocityChange);
+		const float InputScale = AppliedMagnitude / MaximumInputVelocityChange;
+		AddMovementInput(HorizontalChange.GetSafeNormal(), InputScale, true);
+		AppliedVelocityChange = HorizontalChange.GetSafeNormal() * AppliedMagnitude;
+	}
+
+	if (VelocityChange.Z > 0.0f)
+	{
+		const float RemainingLiftSpeed = FMath::Max(
+			0.0f,
+			MaximumLiftSpeed - Movement->Velocity.Z);
+		AppliedVelocityChange.Z = FMath::Min(VelocityChange.Z, RemainingLiftSpeed);
+		if (AppliedVelocityChange.Z > KINDA_SMALL_NUMBER)
+		{
+			Movement->AddImpulse(FVector(0.0f, 0.0f, AppliedVelocityChange.Z), true);
+		}
+	}
+	return AppliedVelocityChange;
+}
+
+FVector AGobulinEnemyActor::ApplyCrowdFallbackDrive(
+	const FVector& WorldDirection,
+	float DesiredSpeed,
+	const FGobulinEnemyCrowdDefinition& CrowdDefinition,
+	float DeltaTime)
+{
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	const FVector Direction = WorldDirection.GetSafeNormal2D();
+	if (!Movement
+		|| Movement->MovementMode == MOVE_None
+		|| Direction.IsNearlyZero()
+		|| !FMath::IsFinite(DesiredSpeed)
+		|| !FMath::IsFinite(CrowdDefinition.FallbackDriveAcceleration)
+		|| !FMath::IsFinite(DeltaTime)
+		|| DeltaTime <= 0.0f)
+	{
+		return FVector::ZeroVector;
+	}
+
+	Movement->MaxWalkSpeed = FMath::Max(0.0f, DesiredSpeed);
+	const float MaximumAcceleration = FMath::Max(0.0f, Movement->GetMaxAcceleration());
+	const float RequestedAcceleration = FMath::Min(
+		FMath::Max(0.0f, CrowdDefinition.FallbackDriveAcceleration),
+		MaximumAcceleration);
+	if (RequestedAcceleration <= KINDA_SMALL_NUMBER || MaximumAcceleration <= KINDA_SMALL_NUMBER)
+	{
+		return FVector::ZeroVector;
+	}
+
+	AddMovementInput(Direction, RequestedAcceleration / MaximumAcceleration, true);
+	return Direction * RequestedAcceleration * DeltaTime;
 }
 
 void AGobulinEnemyActor::ApplyEnemyImpact(const FVector& LaunchVelocity, bool bLethal)
@@ -185,6 +292,7 @@ void AGobulinEnemyActor::BeginDeathPhysics(const FVector& LaunchVelocity)
 	CollisionCapsule->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
 	CollisionCapsule->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
 	CollisionCapsule->SetCollisionResponseToChannel(GobulinCollision::EnemyCorpse, ECR_Block);
+	CollisionCapsule->SetCollisionResponseToChannel(GobulinCollision::EnemySwarmBoundary, ECR_Block);
 	CollisionCapsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	CollisionCapsule->CanCharacterStepUpOn = ECanBeCharacterBase::ECB_No;
 	CollisionCapsule->SetWalkableSlopeOverride(

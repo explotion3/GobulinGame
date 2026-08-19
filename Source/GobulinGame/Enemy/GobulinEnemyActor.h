@@ -10,7 +10,9 @@
 #include "GobulinEnemyActor.generated.h"
 
 class UCapsuleComponent;
+struct FGobulinEnemyCrowdDefinition;
 class UGobulinEnemyArchetype;
+class UGobulinEnemyMovementComponent;
 class UGobulinEnemyPresentationComponent;
 class USceneComponent;
 
@@ -21,7 +23,7 @@ class GOBULINGAME_API AGobulinEnemyActor : public ACharacter, public ICombatantE
 	GENERATED_BODY()
 
 public:
-	AGobulinEnemyActor();
+	AGobulinEnemyActor(const FObjectInitializer& ObjectInitializer);
 
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void Landed(const FHitResult& Hit) override;
@@ -42,10 +44,24 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Enemy|Components")
 	UGobulinEnemyPresentationComponent* GetPresentationComponent() const { return PresentationComponent; }
 
+	UFUNCTION(BlueprintPure, Category = "Enemy|Components")
+	UGobulinEnemyMovementComponent* GetEnemyMovementComponent() const;
+
 	void InitializeEnemy(FCombatantHandle InHandle, const UGobulinEnemyArchetype& Archetype);
 	void ApplyEnemyState(EEnemyState NewState);
+	bool HasCompleteNavigationPathToTarget(AActor* TargetActor, const FEnemyMoveIntent& Intent) const;
 	EEnemyMoveStatus RequestMoveToTarget(AActor* TargetActor, const FEnemyMoveIntent& Intent);
 	void StopEnemyMovement();
+	/** Actor 后端将水平分离转换为移动输入、将垂直抬升转换为冲量；不直接改 Actor Transform。 */
+	FVector ApplyCrowdVelocityChange(
+		const FVector& VelocityChange,
+		float MaximumLiftSpeed,
+		float DeltaTime);
+	FVector ApplyCrowdFallbackDrive(
+		const FVector& WorldDirection,
+		float DesiredSpeed,
+		const FGobulinEnemyCrowdDefinition& CrowdDefinition,
+		float DeltaTime);
 	void ApplyEnemyImpact(const FVector& LaunchVelocity, bool bLethal);
 	void BeginDeathPhysics(const FVector& LaunchVelocity);
 	bool IsEnemyGrounded() const;
@@ -67,5 +83,4 @@ private:
 
 	UPROPERTY(Transient)
 	FGobulinEnemyReactionDefinition ReactionDefinition;
-
 };

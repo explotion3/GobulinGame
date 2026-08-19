@@ -4,6 +4,7 @@
 #include "Combat/CombatantHandle.h"
 #include "Combat/CombatantSnapshot.h"
 #include "Enemy/EnemyContactDamageTypes.h"
+#include "Enemy/EnemyCrowdTypes.h"
 #include "Enemy/EnemyNavigationTypes.h"
 #include "Enemy/EnemyReactionTypes.h"
 #include "Enemy/EnemyStateTypes.h"
@@ -45,6 +46,9 @@ struct GOBULINGAME_API FGobulinEnemyRuntimeStats
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
 	FGobulinEnemyReactionDefinition Reaction;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	FGobulinEnemyCrowdDefinition Crowd;
 };
 
 /** Backend-neutral mutable data for one enemy instance. Contains no Actor or Mass handle. */
@@ -95,6 +99,9 @@ struct GOBULINGAME_API FGobulinEnemyRuntimeData
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
 	FGobulinEnemyReactionData Reaction;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
+	FGobulinEnemyCrowdData Crowd;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|Runtime")
 	float NextBehaviorUpdateTime = 0.0f;

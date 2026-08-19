@@ -4,6 +4,7 @@
 #include "Combat/DamageProtocol.h"
 #include "Containers/Queue.h"
 #include "Enemy/EnemyEventTypes.h"
+#include "Enemy/EnemyDebugTypes.h"
 #include "Enemy/EnemySpawnProtocol.h"
 #include "Enemy/GobulinEnemyRuntimeData.h"
 #include "Subsystems/WorldSubsystem.h"
@@ -61,14 +62,39 @@ public:
 		int32 IntentSequence,
 		EEnemyMoveStatus Status);
 
+	/** 为 Gameplay Debugger 和一次性日志生成只读快照；不会改变敌人状态。 */
+	bool GetEnemyDebugSnapshot(
+		FCombatantHandle Enemy,
+		FGobulinEnemyDebugSnapshot& OutSnapshot) const;
+	void GetAllEnemyDebugSnapshots(TArray<FGobulinEnemyDebugSnapshot>& OutSnapshots) const;
+
 protected:
 	virtual bool DoesSupportWorldType(const EWorldType::Type WorldType) const override;
 
 private:
+	struct FEnemyDebugRecord
+	{
+		FVector DriveVelocityChange = FVector::ZeroVector;
+		FVector SeparationVelocityChange = FVector::ZeroVector;
+		FVector LiftVelocityChange = FVector::ZeroVector;
+		FVector SampleLocation = FVector::ZeroVector;
+		FCombatantHandle SampleTarget;
+		float SampleTargetDistance = 0.0f;
+		float LastSampleTime = 0.0f;
+		float LastTargetProgressTime = 0.0f;
+		float DistanceMovedLastSample = 0.0f;
+		float TargetDistanceDeltaLastSample = 0.0f;
+		float NoTargetProgressTime = 0.0f;
+		bool bInitialized = false;
+		bool bTargetProgressStalled = false;
+		FString LastMovementEvent = TEXT("None");
+	};
+
 	struct FActorEnemyRecord
 	{
 		FGobulinEnemyRuntimeData RuntimeData;
 		TWeakObjectPtr<AGobulinEnemyActor> Actor;
+		FEnemyDebugRecord Debug;
 	};
 
 	void HandleArchetypeLoaded(FCombatCommandId CommandId);
@@ -82,6 +108,20 @@ private:
 		FCombatantHandle Enemy,
 		float WorldTime,
 		const TArray<FCombatantSnapshot>& Combatants);
+	void UpdateEnemyCrowd(float DeltaTime);
+	void UpdateEnemyDebugTracking(float WorldTime);
+	void DrawEnemyDebug() const;
+	void DumpEnemyDebug() const;
+	void SetEnemyDebugMovementEvent(FActorEnemyRecord& Record, FString Event);
+	bool TryEnterCrowdPushing(FActorEnemyRecord& Record, float WorldTime);
+	void ResetNavigationProgress(FActorEnemyRecord& Record, float WorldTime);
+	void ClearNavigationExecutionTracking(FActorEnemyRecord& Record);
+	void RejectNavigationPath(
+		FActorEnemyRecord& Record,
+		float WorldTime,
+		const TCHAR* DebugReason);
+	bool UpdateNavigationExecutionWatchdog(FActorEnemyRecord& Record, float WorldTime);
+	bool HasNavigationRecoveryContextChanged(const FActorEnemyRecord& Record) const;
 	const FCombatantSnapshot* FindBestTarget(
 		const FGobulinEnemyRuntimeData& RuntimeData,
 		const FVector& EnemyLocation,
